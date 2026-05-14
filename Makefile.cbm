@@ -524,6 +524,20 @@ $(BUILD_DIR)/codebase-memory-mcp: $(MAIN_SRC) $(PROD_SRCS) $(EXTRACTION_SRCS) $(
 
 cbm: $(BUILD_DIR)/codebase-memory-mcp
 	@echo "Built: $(BUILD_DIR)/codebase-memory-mcp"
+ifeq ($(shell uname -s),Darwin)
+	@codesign --sign - --force $(BUILD_DIR)/codebase-memory-mcp 2>/dev/null && echo "Signed: $(BUILD_DIR)/codebase-memory-mcp (ad-hoc)"
+endif
+
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: cbm
+	@mkdir -p $(INSTALL_DIR)
+	@cp $(BUILD_DIR)/codebase-memory-mcp $(INSTALL_DIR)/codebase-memory-mcp
+ifeq ($(shell uname -s),Darwin)
+	@codesign --sign - --force $(INSTALL_DIR)/codebase-memory-mcp 2>/dev/null && echo "Installed+signed: $(INSTALL_DIR)/codebase-memory-mcp"
+else
+	@echo "Installed: $(INSTALL_DIR)/codebase-memory-mcp"
+endif
 
 # ── Build with embedded UI (requires Node.js) ───────────────────
 
