@@ -320,7 +320,13 @@ static const tool_def_t TOOLS[] = {
      "Execute a Cypher query against the knowledge graph for complex multi-hop patterns, "
      "aggregations, and cross-service analysis. The response includes 'total' (returned "
      "row count). There is a hard 100k row ceiling — for broad queries add LIMIT in the "
-     "Cypher itself or use search_graph + offset/limit pagination instead.",
+     "Cypher itself or use search_graph + offset/limit pagination instead. "
+     "Node properties from the extraction pipeline (is_test, complexity, return_type, "
+     "base_classes, signature, param_names, docstring, is_exported, is_entry_point, "
+     "lines, decorator_tags, parent_class, route_path, route_method) are queryable in "
+     "WHERE, RETURN, and ORDER BY. WHERE filters on these properties are unindexed "
+     "post-filters — all MATCH candidates are scanned; suitable for result sets up to "
+     "~10,000 nodes. Comparisons are lexicographic (string-based).",
      "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Cypher "
      "query\"},\"project\":{\"type\":\"string\"},\"max_rows\":{\"type\":\"integer\","
      "\"description\":"
