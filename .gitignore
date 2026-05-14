@@ -41,6 +41,12 @@ Thumbs.db
 memory/
 reference/
 
+# Speckit planning artifacts
+specs/
+.specify/
+.sisyphus/
+AGENTS.md
+
 # Build artifacts
 build/
 node_modules/
