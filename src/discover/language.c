@@ -321,6 +321,12 @@ static const ext_entry_t EXT_TABLE[] = {
     /* Apex */
     {".cls", CBM_LANG_APEX},
 
+    /* ObjectScript Routine (.mac/.int/.rtn/.inc) — .cls handled by cbm_disambiguate_cls */
+    {".mac", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".int", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".rtn", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".inc", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+
     /* Crystal */
     {".cr", CBM_LANG_CRYSTAL},
 
@@ -808,6 +814,8 @@ static const char *LANG_NAMES[CBM_LANG_COUNT] = {
     [CBM_LANG_APEX] = "Apex",
     [CBM_LANG_SOQL] = "SOQL",
     [CBM_LANG_SOSL] = "SOSL",
+    [CBM_LANG_OBJECTSCRIPT_UDL]     = "ObjectScript UDL",
+    [CBM_LANG_OBJECTSCRIPT_ROUTINE] = "ObjectScript Routine",
 
 };
 
@@ -975,4 +983,33 @@ CBMLanguage cbm_disambiguate_m(const char *path) {
     }
 
     return CBM_LANG_MATLAB;
+}
+
+CBMLanguage cbm_disambiguate_cls(const char *path) {
+    if (!path) {
+        return CBM_LANG_APEX;
+    }
+
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        return CBM_LANG_APEX;
+    }
+
+    char buf[CBM_SZ_4K + SKIP_ONE];
+    size_t n = fread(buf, SKIP_ONE, CBM_SZ_4K, f);
+    buf[n] = '\0';
+    (void)fclose(f);
+
+    const char *line = buf;
+    while (*line) {
+        if (strncmp(line, "Class ", 6) == 0 && isupper((unsigned char)line[6])) {
+            return CBM_LANG_OBJECTSCRIPT_UDL;
+        }
+        const char *nl = strchr(line, '\n');
+        if (!nl) {
+            break;
+        }
+        line = nl + SKIP_ONE;
+    }
+    return CBM_LANG_APEX;
 }

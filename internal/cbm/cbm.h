@@ -166,7 +166,9 @@ typedef enum {
     CBM_LANG_SOSL,
     CBM_LANG_KUSTOMIZE, // kustomization.yaml — Kubernetes overlay tool
     CBM_LANG_K8S,       // Generic Kubernetes manifest (apiVersion: detected)
-    CBM_LANG_PINE,      // Pine Script (TradingView indicator / strategy language)
+    CBM_LANG_PINE,               // Pine Script (TradingView indicator / strategy language)
+    CBM_LANG_OBJECTSCRIPT_UDL,   // InterSystems ObjectScript UDL (.cls class files)
+    CBM_LANG_OBJECTSCRIPT_ROUTINE, // InterSystems ObjectScript routine (.mac/.int/.rtn/.inc)
     CBM_LANG_COUNT
 } CBMLanguage;
 
