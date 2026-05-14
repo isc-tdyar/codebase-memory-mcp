@@ -1181,6 +1181,31 @@ static int collect_bases_from_field(CBMArena *a, TSNode field_node, const char *
 // Extract base class names from a class node.
 static const char **extract_base_classes(CBMArena *a, TSNode node, const char *source,
                                          CBMLanguage lang) {
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL) {
+        TSNode ext = cbm_find_child_by_kind(node, "class_extends");
+        if (!ts_node_is_null(ext)) {
+            const char *bases[MAX_BASES];
+            int base_count = 0;
+            uint32_t nc = ts_node_named_child_count(ext);
+            for (uint32_t i = 0; i < nc && base_count < MAX_BASES_MINUS_1; i++) {
+                TSNode ch = ts_node_named_child(ext, i);
+                if (strcmp(ts_node_type(ch), "class_name") == 0) {
+                    char *base = cbm_node_text(a, ch, source);
+                    if (base && base[0]) bases[base_count++] = base;
+                }
+            }
+            if (base_count > 0) {
+                const char **result =
+                    (const char **)cbm_arena_alloc(a, (base_count + 1) * sizeof(const char *));
+                if (result) {
+                    for (int i = 0; i < base_count; i++) result[i] = bases[i];
+                    result[base_count] = NULL;
+                    return result;
+                }
+            }
+        }
+        return NULL;
+    }
     (void)lang;
     static const char *fields[] = {"superclass",
                                    "superclasses",
