@@ -992,6 +992,43 @@ TEST(lang_ext_soql) {
     PASS();
 }
 
+TEST(lang_ext_objectscript_routine) {
+    ASSERT_EQ(cbm_language_for_extension(".mac"), CBM_LANG_OBJECTSCRIPT_ROUTINE);
+    ASSERT_EQ(cbm_language_for_extension(".int"), CBM_LANG_OBJECTSCRIPT_ROUTINE);
+    ASSERT_EQ(cbm_language_for_extension(".rtn"), CBM_LANG_OBJECTSCRIPT_ROUTINE);
+    ASSERT_EQ(cbm_language_for_extension(".inc"), CBM_LANG_OBJECTSCRIPT_ROUTINE);
+    PASS();
+}
+
+TEST(lang_cls_disambiguate_objectscript) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_cls_udl.cls", cbm_tmpdir());
+    FILE *f = fopen(path, "w");
+    ASSERT_NOT_NULL(f);
+    fprintf(f, "Class MyApp.Patient Extends %%Persistent\n{\n}\n");
+    fclose(f);
+    ASSERT_EQ(cbm_disambiguate_cls(path), CBM_LANG_OBJECTSCRIPT_UDL);
+    remove(path);
+    PASS();
+}
+
+TEST(lang_cls_disambiguate_apex) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_cls_apex.cls", cbm_tmpdir());
+    FILE *f = fopen(path, "w");
+    ASSERT_NOT_NULL(f);
+    fprintf(f, "public class MyController {\n    public String name;\n}\n");
+    fclose(f);
+    ASSERT_EQ(cbm_disambiguate_cls(path), CBM_LANG_APEX);
+    remove(path);
+    PASS();
+}
+
+TEST(lang_cls_disambiguate_default_on_read_fail) {
+    ASSERT_EQ(cbm_disambiguate_cls("/tmp/nonexistent_file_54321.cls"), CBM_LANG_APEX);
+    PASS();
+}
+
 TEST(lang_ext_sosl) {
     ASSERT_EQ(cbm_language_for_extension(".sosl"), CBM_LANG_SOSL);
     PASS();
@@ -1240,6 +1277,10 @@ SUITE(language) {
     RUN_TEST(lang_ext_apex);
     RUN_TEST(lang_ext_soql);
     RUN_TEST(lang_ext_sosl);
+    RUN_TEST(lang_ext_objectscript_routine);
+    RUN_TEST(lang_cls_disambiguate_objectscript);
+    RUN_TEST(lang_cls_disambiguate_apex);
+    RUN_TEST(lang_cls_disambiguate_default_on_read_fail);
 
     RUN_TEST(lang_all_have_names);
 }

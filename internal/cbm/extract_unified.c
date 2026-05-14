@@ -57,6 +57,50 @@ static void recompute_state(WalkState *state, const char *module_qn) {
     }
 }
 
+static const char *objectscript_get_class_name(CBMExtractCtx *ctx, TSNode node) {
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
+        TSNode child = ts_node_named_child(node, i);
+        if (strcmp(ts_node_type(child), "class_name") == 0) {
+            char *name = cbm_node_text(ctx->arena, child, ctx->source);
+            if (name && name[0]) {
+                return cbm_fqn_compute(ctx->arena, ctx->project, ctx->rel_path, name);
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char *objectscript_get_method_qn(CBMExtractCtx *ctx, TSNode node,
+                                               const char *enclosing_class_qn) {
+    const char *nk = ts_node_type(node);
+    if (strcmp(nk, "method") != 0 && strcmp(nk, "classmethod") != 0) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
+        TSNode child = ts_node_named_child(node, i);
+        if (strcmp(ts_node_type(child), "method_definition") == 0) {
+            for (uint32_t j = 0; j < ts_node_named_child_count(child); j++) {
+                TSNode mchild = ts_node_named_child(child, j);
+                if (strcmp(ts_node_type(mchild), "method_name") == 0) {
+                    if (ts_node_named_child_count(mchild) > 0) {
+                        TSNode ident = ts_node_named_child(mchild, 0);
+                        char *name = cbm_node_text(ctx->arena, ident, ctx->source);
+                        if (name && name[0]) {
+                            if (enclosing_class_qn) {
+                                return cbm_arena_sprintf(ctx->arena, "%s.%s",
+                                                        enclosing_class_qn, name);
+                            }
+                            return cbm_fqn_compute(ctx->arena, ctx->project,
+                                                   ctx->rel_path, name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 // Try to resolve Wolfram function QN from set_delayed_top/set_top/set_delayed/set LHS.
 static const char *compute_wolfram_func_qn(CBMExtractCtx *ctx, TSNode node) {
     const char *nk = ts_node_type(node);
@@ -93,10 +137,22 @@ static TSNode resolve_func_name_node(TSNode node) {
 
 // Compute function QN for scope tracking (mirrors cbm_enclosing_func_qn logic).
 static const char *compute_func_qn(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec,
-                                   WalkState *state) {
+                                    WalkState *state) {
     (void)spec;
     if (ctx->language == CBM_LANG_WOLFRAM) {
         return compute_wolfram_func_qn(ctx, node);
+    }
+    if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL) {
+        return objectscript_get_method_qn(ctx, node, state->enclosing_class_qn);
+    }
+    if (ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+        if (strcmp(ts_node_type(node), "tag") == 0) {
+            char *name = cbm_node_text(ctx->arena, node, ctx->source);
+            if (name && name[0]) {
+                return cbm_fqn_compute(ctx->arena, ctx->project, ctx->rel_path, name);
+            }
+        }
+        return NULL;
     }
 
     TSNode name_node = resolve_func_name_node(node);
@@ -117,6 +173,9 @@ static const char *compute_func_qn(CBMExtractCtx *ctx, TSNode node, const CBMLan
 
 // Compute class QN for scope tracking.
 static const char *compute_class_qn(CBMExtractCtx *ctx, TSNode node) {
+    if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL) {
+        return objectscript_get_class_name(ctx, node);
+    }
     TSNode name_node = ts_node_child_by_field_name(node, TS_FIELD("name"));
     if (ts_node_is_null(name_node)) {
         return NULL;
