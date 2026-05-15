@@ -1779,6 +1779,9 @@ static const char *node_string_field(const cbm_node_t *n, const char *prop) {
     return NULL;
 }
 
+static const char *json_extract_prop(const char *json, const char *key, char *buf,
+                                     size_t buf_sz);
+
 /* Get node property by name.
  * store may be NULL; only needed for virtual degree properties. */
 static const char *node_prop(const cbm_node_t *n, const char *prop, cbm_store_t *store) {
@@ -1809,7 +1812,14 @@ static const char *node_prop(const cbm_node_t *n, const char *prop, cbm_store_t 
         snprintf(int_buf, sizeof(int_buf), "%d", val);
         return int_buf;
     }
-    return "";
+    /* JSON props fallback — mirrors edge_prop() pattern.
+     * Rotating 8-buffer allows multiple JSON props per row
+     * (e.g. RETURN n.complexity, n.is_test, n.return_type). */
+    static char nbufs[CYP_BUF_8][CBM_SZ_512];
+    static int  nbuf_idx = 0;
+    char       *nbuf     = nbufs[nbuf_idx++ & CYP_EBUF_MASK];
+    json_extract_prop(n->properties_json, prop, nbuf, CBM_SZ_512);
+    return nbuf;
 }
 
 /* Extract a string value from JSON properties_json by key.

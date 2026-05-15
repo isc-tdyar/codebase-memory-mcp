@@ -591,6 +591,127 @@ TEST(tool_query_graph_missing_query) {
     PASS();
 }
 
+/* ── JSON props Cypher tests (feature 002-cypher-node-props) ─────── */
+
+/* Helper: server with one Function node carrying JSON props */
+static cbm_mcp_server_t *setup_mcp_json_props(void) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    const char *proj = "json-props-test";
+    cbm_mcp_server_set_project(srv, proj);
+    cbm_store_upsert_project(st, proj, "/tmp/json-props-test");
+
+    cbm_node_t fn = {0};
+    fn.project = proj;
+    fn.label = "Function";
+    fn.name = "myTestFn";
+    fn.qualified_name = "json-props-test.myTestFn";
+    fn.file_path = "src/test.py";
+    fn.start_line = 1;
+    fn.end_line = 10;
+    fn.properties_json =
+        "{\"complexity\":15,\"lines\":10,\"is_exported\":true,"
+        "\"is_test\":true,\"is_entry_point\":false,"
+        "\"return_type\":\"bool\",\"signature\":\"myTestFn(x: int)\"}";
+    cbm_store_upsert_node(st, &fn);
+
+    cbm_node_t cls = {0};
+    cls.project = proj;
+    cls.label = "Class";
+    cls.name = "MyApp.Patient";
+    cls.qualified_name = "json-props-test.MyApp.Patient";
+    cls.file_path = "src/Patient.cls";
+    cls.start_line = 1;
+    cls.end_line = 20;
+    cls.properties_json =
+        "{\"complexity\":0,\"lines\":20,\"is_exported\":true,"
+        "\"is_test\":false,\"is_entry_point\":false,"
+        "\"base_classes\":[\"%Persistent\"]}";
+    cbm_store_upsert_node(st, &cls);
+
+    return srv;
+}
+
+TEST(tool_query_graph_json_prop_return) {
+    cbm_mcp_server_t *srv = setup_mcp_json_props();
+
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":200,\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"query_graph\","
+        "\"arguments\":{\"project\":\"json-props-test\","
+        "\"query\":\"MATCH (n:Function) RETURN n.is_test, n.complexity\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"result\""));
+    /* After fix: is_test and complexity are returned from the JSON blob */
+    ASSERT_NOT_NULL(strstr(resp, "true"));
+    ASSERT_NOT_NULL(strstr(resp, "15"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_query_graph_json_prop_where) {
+    cbm_mcp_server_t *srv = setup_mcp_json_props();
+
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":201,\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"query_graph\","
+        "\"arguments\":{\"project\":\"json-props-test\","
+        "\"query\":\"MATCH (n:Function) WHERE n.is_test = 'true' RETURN n.name\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"result\""));
+    /* After fix: WHERE on JSON prop filters correctly */
+    ASSERT_NOT_NULL(strstr(resp, "myTestFn"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_query_graph_json_prop_absent) {
+    cbm_mcp_server_t *srv = setup_mcp_json_props();
+
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":202,\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"query_graph\","
+        "\"arguments\":{\"project\":\"json-props-test\","
+        "\"query\":\"MATCH (n:Function) RETURN n.nonexistent_prop\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"result\""));
+    /* Absent JSON prop must return empty string, not crash */
+    /* Result should not contain an error */
+    ASSERT_NULL(strstr(resp, "\"error\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_query_graph_json_prop_contains) {
+    cbm_mcp_server_t *srv = setup_mcp_json_props();
+
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":203,\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"query_graph\","
+        "\"arguments\":{\"project\":\"json-props-test\","
+        "\"query\":\"MATCH (n:Class) WHERE n.base_classes CONTAINS 'Persistent' RETURN n.name\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"result\""));
+    /* After fix: CONTAINS on JSON array string matches */
+    ASSERT_NOT_NULL(strstr(resp, "MyApp.Patient"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* ── end JSON props tests ─────────────────────────────────────────── */
+
 /* ══════════════════════════════════════════════════════════════════
  *  PIPELINE-DEPENDENT TOOL HANDLERS
  * ══════════════════════════════════════════════════════════════════ */
@@ -1825,6 +1946,10 @@ SUITE(mcp) {
     RUN_TEST(tool_get_architecture_empty);
     RUN_TEST(tool_get_architecture_emits_populated_sections);
     RUN_TEST(tool_query_graph_missing_query);
+    RUN_TEST(tool_query_graph_json_prop_return);
+    RUN_TEST(tool_query_graph_json_prop_where);
+    RUN_TEST(tool_query_graph_json_prop_absent);
+    RUN_TEST(tool_query_graph_json_prop_contains);
 
     /* Pipeline-dependent tool handlers */
     RUN_TEST(tool_index_repository_missing_path);
