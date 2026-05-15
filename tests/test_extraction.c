@@ -1485,6 +1485,127 @@ TEST(wolfram_nested_def) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ * Group H2: ObjectScript (InterSystems IRIS)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+TEST(objectscript_udl_class) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n{\n}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_methods) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Utils Extends %RegisteredObject\n"
+        "{\n"
+        "ClassMethod Format(pVal As %String) As %String\n"
+        "{\n"
+        "    Quit pVal\n"
+        "}\n"
+        "Method Save() As %Status\n"
+        "{\n"
+        "    Quit ..%Save()\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Utils.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Utils"));
+    ASSERT(has_def(r, "Method", "Format"));
+    ASSERT(has_def(r, "Method", "Save"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_base_classes) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    int found = 0;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "MyApp.Patient") == 0) {
+            found = 1;
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[0]);
+            ASSERT_STR_EQ(r->defs.items[i].base_classes[0], "%Persistent");
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_multiple_bases) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Dual Extends (MyApp.Base, %RegisteredObject)\n"
+        "{\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Dual.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    int found = 0;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "MyApp.Dual") == 0) {
+            found = 1;
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[0]);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[1]);
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_properties) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "Property Name As %String;\n"
+        "Property DOB As %Date;\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    ASSERT(has_def(r, "Variable", "Name"));
+    ASSERT(has_def(r, "Variable", "DOB"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_routine_tags) {
+    CBMFileResult *r = extract(
+        "UTILS\n"
+        "    Quit\n"
+        "\n"
+        "Format(value,fmt)\n"
+        "    Set result = $ZDate(value, fmt)\n"
+        "    Quit result\n"
+        "\n"
+        "Log(msg)\n"
+        "    Write msg,!\n"
+        "    Quit\n",
+        CBM_LANG_OBJECTSCRIPT_ROUTINE, "t", "Utils.mac");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Function", "Format"));
+    ASSERT(has_def(r, "Function", "Log"));
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
 
@@ -2395,6 +2516,13 @@ SUITE(extraction) {
     RUN_TEST(wolfram_parse);
     RUN_TEST(wolfram_import);
     RUN_TEST(wolfram_nested_def);
+
+    RUN_TEST(objectscript_udl_class);
+    RUN_TEST(objectscript_udl_methods);
+    RUN_TEST(objectscript_udl_base_classes);
+    RUN_TEST(objectscript_udl_multiple_bases);
+    RUN_TEST(objectscript_udl_properties);
+    RUN_TEST(objectscript_routine_tags);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
