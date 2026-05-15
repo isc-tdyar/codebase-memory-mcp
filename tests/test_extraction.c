@@ -1605,6 +1605,64 @@ TEST(objectscript_routine_tags) {
     PASS();
 }
 
+TEST(objectscript_udl_query_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Repo Extends %Persistent\n"
+        "{\n"
+        "Query FindAll(name As %String) As %SQLQuery { SELECT * FROM MyApp_Repo }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Repo.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Repo"));
+    ASSERT(has_def(r, "Method", "FindAll"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_index_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Repo Extends %Persistent\n"
+        "{\n"
+        "Property Name As %String;\n"
+        "Index NameIdx On Name;\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Repo.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Index", "NameIdx"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_xdata_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends %CSP.REST\n"
+        "{\n"
+        "XData UrlMap { <Routes/> }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "UrlMap"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_trigger_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Log Extends %Persistent\n"
+        "{\n"
+        "Trigger AfterInsert [ Event = INSERT ] { }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Log.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "AfterInsert"));
+    cbm_free_result(r);
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
@@ -2523,6 +2581,10 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_multiple_bases);
     RUN_TEST(objectscript_udl_properties);
     RUN_TEST(objectscript_routine_tags);
+    RUN_TEST(objectscript_udl_query_member);
+    RUN_TEST(objectscript_udl_index_member);
+    RUN_TEST(objectscript_udl_xdata_member);
+    RUN_TEST(objectscript_udl_trigger_member);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
