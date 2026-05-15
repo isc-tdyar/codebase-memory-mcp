@@ -2,6 +2,7 @@
 #include "graph_buffer/graph_buffer.h"
 #include "foundation/log.h"
 #include "foundation/constants.h"
+#include "foundation/str_util.h"
 #include <yyjson/yyjson.h>
 
 #include <stdio.h>
@@ -33,8 +34,10 @@ static void build_props(char *buf, size_t bufsz, yyjson_val *root,
     for (int i = 0; i < nkeys; i++) {
         const char *v = jstr(root, keys[i]);
         if (!v || !v[0]) { continue; }
+        char esc[CBM_SZ_512];
+        cbm_json_escape(esc, (int)sizeof(esc), v);
         if (wrote) { pos += (size_t)snprintf(buf + pos, bufsz - pos, ","); }
-        pos += (size_t)snprintf(buf + pos, bufsz - pos, "\"%s\":\"%s\"", keys[i], v);
+        pos += (size_t)snprintf(buf + pos, bufsz - pos, "\"%s\":\"%s\"", keys[i], esc);
         wrote++;
     }
     snprintf(buf + pos, bufsz - pos, "}");
