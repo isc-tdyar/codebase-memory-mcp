@@ -904,6 +904,22 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         goto cleanup;
     }
 
+    p->gbuf = cbm_gbuf_new(p->project_name, p->repo_path ? p->repo_path : "");
+    p->registry = cbm_registry_new();
+
+    if (p->mode == CBM_MODE_DICTIONARY) {
+        cbm_iris_dict_cfg_t iris_cfg = {
+            .gbuf = p->gbuf, .project_name = p->project_name,
+            .iris_host = p->iris_host, .iris_port = p->iris_port,
+            .iris_namespace = p->iris_namespace, .iris_user = p->iris_user,
+            .iris_pass = p->iris_pass, .iris_package_filter = p->iris_package_filter,
+        };
+        pass_iris_dict_run(&iris_cfg);
+        cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)),
+                     "edges", itoa_buf(cbm_gbuf_edge_count(p->gbuf)));
+        goto cleanup;
+    }
+
     /* Check for existing DB → try incremental or delete for reindex */
     rc = try_incremental_or_delete_db(p, files, file_count);
     if (rc >= 0) {
@@ -911,27 +927,6 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         return rc;
     }
     cbm_log_info("pipeline.route", "path", "full");
-
-    /* Phase 2: Create graph buffer and registry */
-    p->gbuf = cbm_gbuf_new(p->project_name, p->repo_path ? p->repo_path : "");
-    p->registry = cbm_registry_new();
-
-    if (p->mode == CBM_MODE_DICTIONARY) {
-        cbm_iris_dict_cfg_t iris_cfg = {
-            .gbuf = p->gbuf,
-            .project_name    = p->project_name,
-            .iris_host       = p->iris_host,
-            .iris_port       = p->iris_port,
-            .iris_namespace  = p->iris_namespace,
-            .iris_user       = p->iris_user,
-            .iris_pass       = p->iris_pass,
-            .iris_package_filter = p->iris_package_filter,
-        };
-        pass_iris_dict_run(&iris_cfg);
-        cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)),
-                     "edges", itoa_buf(cbm_gbuf_edge_count(p->gbuf)));
-        goto cleanup;
-    }
 
     /* Phase 2b: Load build-tool path aliases (tsconfig/jsconfig today). NULL
      * when no usable configs are found — non-TS projects pay nothing. */
