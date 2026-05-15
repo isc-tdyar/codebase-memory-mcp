@@ -18,6 +18,7 @@ enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 6, P
 #include "pipeline/artifact.h"
 #include "pipeline/pipeline_internal.h"
 #include "pipeline/pass_lsp_cross.h"
+#include "pipeline/pass_iris_dict.h"
 #include "pipeline/worker_pool.h"
 #include "graph_buffer/graph_buffer.h"
 #include "store/store.h"
@@ -75,7 +76,15 @@ struct cbm_pipeline {
     char *project_name;
     cbm_index_mode_t mode;
     atomic_int cancelled;
-    bool persistence; /* write .codebase-memory/graph.db.zst after indexing */
+    bool persistence;
+
+    /* IRIS %Dictionary ingest (optional — NULL if not configured) */
+    char *iris_host;
+    int   iris_port;
+    char *iris_namespace;
+    char *iris_user;
+    char *iris_pass;
+    char *iris_package_filter;
 
     /* Indexing state (set during run) */
     cbm_gbuf_t *gbuf;
@@ -145,6 +154,20 @@ void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
     }
 }
 
+void cbm_pipeline_set_iris(cbm_pipeline_t *p,
+                           const char *host, int port,
+                           const char *ns, const char *user,
+                           const char *pass, const char *pkg_filter) {
+    if (!p) { return; }
+    free(p->iris_host);      p->iris_host      = host      ? strdup(host)       : NULL;
+    free(p->iris_namespace); p->iris_namespace = ns        ? strdup(ns)         : NULL;
+    free(p->iris_user);      p->iris_user      = user      ? strdup(user)       : NULL;
+    free(p->iris_pass);      p->iris_pass      = pass      ? strdup(pass)       : NULL;
+    free(p->iris_package_filter);
+    p->iris_package_filter = pkg_filter ? strdup(pkg_filter) : NULL;
+    p->iris_port = port > 0 ? port : 1972;
+}
+
 void cbm_pipeline_free(cbm_pipeline_t *p) {
     if (!p) {
         return;
@@ -152,6 +175,11 @@ void cbm_pipeline_free(cbm_pipeline_t *p) {
     free(p->repo_path);
     free(p->db_path);
     free(p->project_name);
+    free(p->iris_host);
+    free(p->iris_namespace);
+    free(p->iris_user);
+    free(p->iris_pass);
+    free(p->iris_package_filter);
     /* gbuf, store, registry freed during/after run */
     /* Defensively free userconfig in case run() was never called or panicked */
     if (p->userconfig) {
@@ -881,8 +909,25 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     cbm_log_info("pipeline.route", "path", "full");
 
     /* Phase 2: Create graph buffer and registry */
-    p->gbuf = cbm_gbuf_new(p->project_name, p->repo_path);
+    p->gbuf = cbm_gbuf_new(p->project_name, p->repo_path ? p->repo_path : "");
     p->registry = cbm_registry_new();
+
+    if (p->mode == CBM_MODE_DICTIONARY) {
+        cbm_iris_dict_cfg_t iris_cfg = {
+            .gbuf = p->gbuf,
+            .project_name    = p->project_name,
+            .iris_host       = p->iris_host,
+            .iris_port       = p->iris_port,
+            .iris_namespace  = p->iris_namespace,
+            .iris_user       = p->iris_user,
+            .iris_pass       = p->iris_pass,
+            .iris_package_filter = p->iris_package_filter,
+        };
+        pass_iris_dict_run(&iris_cfg);
+        cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)),
+                     "edges", itoa_buf(cbm_gbuf_edge_count(p->gbuf)));
+        goto cleanup;
+    }
 
     /* Phase 2b: Load build-tool path aliases (tsconfig/jsconfig today). NULL
      * when no usable configs are found — non-TS projects pay nothing. */
@@ -907,6 +952,20 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     rc = run_post_extraction(p, &ctx, files, file_count);
     if (rc != 0) {
         goto cleanup;
+    }
+
+    {
+        cbm_iris_dict_cfg_t iris_cfg = {
+            .gbuf = p->gbuf,
+            .project_name    = p->project_name,
+            .iris_host       = p->iris_host,
+            .iris_port       = p->iris_port,
+            .iris_namespace  = p->iris_namespace,
+            .iris_user       = p->iris_user,
+            .iris_pass       = p->iris_pass,
+            .iris_package_filter = p->iris_package_filter,
+        };
+        pass_iris_dict_run(&iris_cfg);
     }
 
     cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)), "edges",

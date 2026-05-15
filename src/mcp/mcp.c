@@ -268,15 +268,29 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"object\",\"properties\":{\"repo_path\":{\"type\":\"string\",\"description\":"
      "\"Path to the repository\"},"
      "\"mode\":{\"type\":\"string\","
-     "\"enum\":[\"full\",\"moderate\",\"fast\",\"cross-repo-intelligence\"],"
+     "\"enum\":[\"full\",\"moderate\",\"fast\",\"dictionary\",\"cross-repo-intelligence\"],"
      "\"default\":\"full\",\"description\":\"full: all passes. moderate: fast + semantic. "
-     "fast: structure only. cross-repo-intelligence: match Routes/Channels across projects.\"},"
+     "fast: structure only. dictionary: IRIS %%Dictionary ingest only (no source files needed). "
+     "cross-repo-intelligence: match Routes/Channels across projects.\"},"
      "\"target_projects\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},"
      "\"description\":\"Projects to search for cross-repo links (cross-repo-intelligence mode). "
      "Use [\\\"*\\\"] for all indexed projects. Run list_projects to see available projects.\"},"
      "\"persistence\":{\"type\":\"boolean\",\"default\":false,\"description\":"
      "\"Write compressed artifact to .codebase-memory/graph.db.zst for team sharing. "
-     "Teammates can bootstrap from the artifact instead of full re-indexing.\"}"
+     "Teammates can bootstrap from the artifact instead of full re-indexing.\"},"
+     "\"iris_host\":{\"type\":\"string\",\"description\":"
+     "\"IRIS host for %%Dictionary ingest (optional). Enables extraction of Parameters, "
+     "Queries, XData, Triggers, Indexes, Storage, and multi-parent inheritance.\"},"
+     "\"iris_port\":{\"type\":\"integer\",\"default\":1972,\"description\":"
+     "\"IRIS superserver port (default 1972). No web server or Atelier REST required.\"},"
+     "\"iris_namespace\":{\"type\":\"string\",\"default\":\"USER\",\"description\":"
+     "\"IRIS namespace to index.\"},"
+     "\"iris_username\":{\"type\":\"string\",\"default\":\"_SYSTEM\",\"description\":"
+     "\"IRIS username.\"},"
+     "\"iris_password\":{\"type\":\"string\",\"description\":\"IRIS password.\"},"
+     "\"iris_package_filter\":{\"type\":\"string\",\"description\":"
+     "\"Only index classes whose name starts with this prefix (e.g. 'HS.FHIRServer'). "
+     "Default: exclude system classes starting with '%%'.\"}"
      "},\"required\":[\"repo_path\"]}"},
 
     {"search_graph",
@@ -2523,17 +2537,33 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         mode = CBM_MODE_FAST;
     } else if (mode_str && strcmp(mode_str, "moderate") == 0) {
         mode = CBM_MODE_MODERATE;
+    } else if (mode_str && strcmp(mode_str, "dictionary") == 0) {
+        mode = CBM_MODE_DICTIONARY;
     }
     free(mode_str);
 
     bool persistence = cbm_mcp_get_bool_arg(args, "persistence");
 
-    cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
+    char *iris_host   = cbm_mcp_get_string_arg(args, "iris_host");
+    char *iris_ns     = cbm_mcp_get_string_arg(args, "iris_namespace");
+    char *iris_user   = cbm_mcp_get_string_arg(args, "iris_username");
+    char *iris_pass   = cbm_mcp_get_string_arg(args, "iris_password");
+    char *iris_pkg    = cbm_mcp_get_string_arg(args, "iris_package_filter");
+    int   iris_port   = (int)cbm_mcp_get_int_arg(args, "iris_port", 1972);
+
+    cbm_pipeline_t *p = cbm_pipeline_new(
+        (mode == CBM_MODE_DICTIONARY && !repo_path[0]) ? NULL : repo_path,
+        NULL, mode);
     if (!p) {
-        free(repo_path);
+        free(repo_path); free(iris_host); free(iris_ns);
+        free(iris_user); free(iris_pass); free(iris_pkg);
         return cbm_mcp_text_result("failed to create pipeline", true);
     }
     cbm_pipeline_set_persistence(p, persistence);
+    if (iris_host && iris_host[0]) {
+        cbm_pipeline_set_iris(p, iris_host, iris_port, iris_ns, iris_user, iris_pass, iris_pkg);
+    }
+    free(iris_host); free(iris_ns); free(iris_user); free(iris_pass); free(iris_pkg);
 
     char *project_name = heap_strdup(cbm_pipeline_project_name(p));
 
