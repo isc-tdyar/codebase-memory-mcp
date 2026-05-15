@@ -2552,7 +2552,7 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     int   iris_port   = (int)cbm_mcp_get_int_arg(args, "iris_port", 1972);
 
     cbm_pipeline_t *p = cbm_pipeline_new(
-        (mode == CBM_MODE_DICTIONARY && !repo_path[0]) ? NULL : repo_path,
+        (mode == CBM_MODE_DICTIONARY && (!repo_path || !repo_path[0])) ? NULL : repo_path,
         NULL, mode);
     if (!p) {
         free(repo_path); free(iris_host); free(iris_ns);

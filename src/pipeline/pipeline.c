@@ -129,7 +129,7 @@ static const char *itoa_buf(int val) {
 
 cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path,
                                  cbm_index_mode_t mode) {
-    if (!repo_path) {
+    if (!repo_path && mode != CBM_MODE_DICTIONARY) {
         return NULL;
     }
 
@@ -138,9 +138,10 @@ cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path,
         return NULL;
     }
 
-    p->repo_path = strdup(repo_path);
+    const char *effective_path = repo_path ? repo_path : "";
+    p->repo_path = strdup(effective_path);
     p->db_path = db_path ? strdup(db_path) : NULL;
-    p->project_name = cbm_project_name_from_path(repo_path);
+    p->project_name = cbm_project_name_from_path(effective_path);
     p->mode = mode;
     p->persistence = false;
     atomic_init(&p->cancelled, 0);
@@ -879,18 +880,21 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     cbm_set_user_lang_config(p->userconfig);
     CBM_PROF_END("pipeline", "0_userconfig_load", t_userconfig);
 
-    /* Phase 1: Discover files */
+    /* Phase 1: Discover files — skip for dictionary-only mode */
     CBM_PROF_START(t_discover);
-    cbm_discover_opts_t opts = {
-        .mode = p->mode,
-        .ignore_file = NULL,
-        .max_file_size = 0,
-    };
     cbm_file_info_t *files = NULL;
     int file_count = 0;
-    int rc = cbm_discover(p->repo_path, &opts, &files, &file_count);
-    if (rc != 0) {
-        cbm_log_error("pipeline.err", "phase", "discover", "rc", itoa_buf(rc));
+    int rc = 0;
+    if (p->mode != CBM_MODE_DICTIONARY) {
+        cbm_discover_opts_t opts = {
+            .mode = p->mode,
+            .ignore_file = NULL,
+            .max_file_size = 0,
+        };
+        rc = cbm_discover(p->repo_path, &opts, &files, &file_count);
+        if (rc != 0) {
+            cbm_log_error("pipeline.err", "phase", "discover", "rc", itoa_buf(rc));
+        }
     }
     CBM_PROF_END_N("pipeline", "1_discover", t_discover, file_count);
     cbm_log_info("pipeline.discover", "files", itoa_buf(file_count), "elapsed_ms",
