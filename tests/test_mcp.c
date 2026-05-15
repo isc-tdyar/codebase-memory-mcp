@@ -591,6 +591,40 @@ TEST(tool_query_graph_missing_query) {
     PASS();
 }
 
+TEST(tool_query_graph_int_props_no_alias) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    const char *proj = "int-alias-test";
+    cbm_mcp_server_set_project(srv, proj);
+    cbm_store_upsert_project(st, proj, "/tmp/int-alias-test");
+
+    cbm_node_t fn = {0};
+    fn.project = proj;
+    fn.label = "Function";
+    fn.name = "myFn";
+    fn.qualified_name = "int-alias-test.myFn";
+    fn.file_path = "src/a.py";
+    fn.start_line = 5;
+    fn.end_line = 20;
+    fn.properties_json = "{}";
+    cbm_store_upsert_node(st, &fn);
+
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":210,\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"query_graph\","
+        "\"arguments\":{\"project\":\"int-alias-test\","
+        "\"query\":\"MATCH (n:Function) RETURN n.start_line, n.end_line\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"result\""));
+    ASSERT_NOT_NULL(strstr(resp, "5"));
+    ASSERT_NOT_NULL(strstr(resp, "20"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 /* ══════════════════════════════════════════════════════════════════
  *  PIPELINE-DEPENDENT TOOL HANDLERS
  * ══════════════════════════════════════════════════════════════════ */
@@ -1824,7 +1858,8 @@ SUITE(mcp) {
     RUN_TEST(tool_delete_project_not_found);
     RUN_TEST(tool_get_architecture_empty);
     RUN_TEST(tool_get_architecture_emits_populated_sections);
-    RUN_TEST(tool_query_graph_missing_query);
+    RUN_TEST(tool_query_graph_missing_query); 
+    RUN_TEST(tool_query_graph_int_props_no_alias);
 
     /* Pipeline-dependent tool handlers */
     RUN_TEST(tool_index_repository_missing_path);
