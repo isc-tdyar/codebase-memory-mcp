@@ -55,7 +55,7 @@ static void process_line(cbm_iris_dict_cfg_t *cfg, const char *line) {
         return;
     }
     if (strcmp(type, "error") == 0) {
-        cbm_log_warn("iris_dict: %s", jstr(root, "message"));
+        cbm_log_warn("iris_dict.error", "message", jstr(root, "message"));
         yyjson_doc_free(doc);
         return;
     }
@@ -168,26 +168,30 @@ int pass_iris_dict_run(cbm_iris_dict_cfg_t *cfg) {
         snprintf(extractor_path, sizeof(extractor_path), "tools/iris_dict_extractor.py");
     }
 
+    const char *pkg = cfg->iris_package_filter ? cfg->iris_package_filter : "";
     char cmd[IRIS_DICT_PATH_MAX * 2];
-    snprintf(cmd, sizeof(cmd),
-             "python3 \"%s\""
+    int cx = snprintf(cmd, sizeof(cmd),
+             "env PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\" python3 -u \"%s\""
              " --host \"%s\" --port %d"
              " --namespace \"%s\" --user \"%s\" --pass \"%s\""
-             " --package \"%s\"",
+             " --package \"",
              extractor_path,
              cfg->iris_host, cfg->iris_port > 0 ? cfg->iris_port : 1972,
              cfg->iris_namespace ? cfg->iris_namespace : "USER",
              cfg->iris_user      ? cfg->iris_user      : "_SYSTEM",
-             cfg->iris_pass      ? cfg->iris_pass      : "",
-             cfg->iris_package_filter ? cfg->iris_package_filter : "");
+             cfg->iris_pass      ? cfg->iris_pass      : "");
+    for (int i = 0; pkg[i] && cx < (int)sizeof(cmd) - 16; i++) {
+        cmd[cx++] = pkg[i];
+    }
+    cmd[cx] = '\0';
+    strncat(cmd, "\" 2>/dev/null", sizeof(cmd) - (size_t)cx - 1);
 
-    cbm_log_info("iris_dict: running extractor (host=%s port=%d ns=%s)",
-                 cfg->iris_host, cfg->iris_port,
-                 cfg->iris_namespace ? cfg->iris_namespace : "USER");
+    cbm_log_info("iris_dict.start", "host", cfg->iris_host,
+                 "namespace", cfg->iris_namespace ? cfg->iris_namespace : "USER");
 
     FILE *pipe = popen(cmd, "r");
     if (!pipe) {
-        cbm_log_warn("iris_dict: popen failed — python3 not found or extractor missing");
+        cbm_log_warn("iris_dict.popen_failed");
         return 0;
     }
 
@@ -202,9 +206,9 @@ int pass_iris_dict_run(cbm_iris_dict_cfg_t *cfg) {
 
     int status = pclose(pipe);
     if (status != 0) {
-        cbm_log_warn("iris_dict: extractor exited with status %d", status);
+        cbm_log_warn("iris_dict.extractor_nonzero_exit");
     } else {
-        cbm_log_info("iris_dict: extraction complete");
+        cbm_log_info("iris_dict.done");
     }
     return 0;
 }

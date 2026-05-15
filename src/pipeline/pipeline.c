@@ -917,6 +917,8 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         pass_iris_dict_run(&iris_cfg);
         cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)),
                      "edges", itoa_buf(cbm_gbuf_edge_count(p->gbuf)));
+        struct timespec t_dump;
+        rc = dump_and_persist_hashes(p, NULL, 0, &t_dump);
         goto cleanup;
     }
 
