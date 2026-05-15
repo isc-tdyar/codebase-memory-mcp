@@ -28,7 +28,7 @@
   - `iris.connect()` with error handling → exit 1 + stderr on failure
   - 8 SQL queries (see research.md Decision 2) using `WHERE parent %STARTSWITH ?` filter
   - Stream NDJSON to stdout: one JSON record per line
-  - Handle multi-parent Super field: split on `|`, emit separate `inherits` records
+  - Handle multi-parent Super field: split on `,`, emit separate `inherits` records
   - Handle encoding errors: replace binary content with `"<binary>"`, continue
   - Final `{"type":"done","count":N}` record
 

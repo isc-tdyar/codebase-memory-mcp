@@ -91,3 +91,13 @@ CBM looks for it at: `$(dirname $argv[0])/tools/iris_dict_extractor.py`, then `$
 | XDataDefinition | 1,324 |
 | TriggerDefinition | 154 |
 | StorageDefinition | 681 |
+
+## Decision 8: JSON parsing in C pass — yyjson (already vendored)
+- **Decision**: Use `yyjson_read()` / `yyjson_obj_get()` to parse each NDJSON line in `pass_iris_dict.c`.
+- **Rationale**: yyjson is already included in CBM (`src/ui/http_server.c` uses it). Zero new dependencies.
+- **Usage**: `yyjson_doc *doc = yyjson_read(line, strlen(line), 0)` per line, then `yyjson_obj_get(root, "type")` etc.
+
+## Decision 9: Super field delimiter is COMMA not pipe
+- **Decision**: `%Dictionary.ClassDefinition.Super` uses `,` to separate multiple parents.
+- **Evidence**: Live query confirmed — `%AI.MCP.Service` has `Super = "%CSP.REST,%CSP.WebSocket"`.
+- **Fix applied**: Python extractor splits `super.split(',')`, not `super.split('|')`.
