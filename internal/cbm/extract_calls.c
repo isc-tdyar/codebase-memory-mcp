@@ -359,6 +359,21 @@ static char *extract_callee_lang_specific(CBMArena *a, TSNode node, const char *
             }
             return NULL;
         }
+        if (strcmp(nk, "macro") == 0) {
+            char *raw = cbm_node_text(a, node, source);
+            if (!raw || raw[0] != '$' || raw[1] != '$' || raw[2] != '$') {
+                return NULL;
+            }
+            char *name_start = raw + 3;
+            char *paren = strchr(name_start, '(');
+            if (paren) {
+                *paren = '\0';
+            }
+            if (!name_start[0]) {
+                return NULL;
+            }
+            return cbm_arena_sprintf(a, "$$$%s", name_start);
+        }
         return NULL;
     }
 

@@ -1,5 +1,7 @@
 /*
- * test_extraction.c — Regression tests for the extraction module.
+ * test_e
+
+xtraction.c — Regression tests for the extraction module.
  *
  * Port of internal/cbm/regression_test.go (1282 LOC, ~80 test cases).
  * Exercises cbm_extract_file() on code snippets across 30+ languages,
@@ -1654,6 +1656,27 @@ TEST(objectscript_routine_calls_tag) {
     PASS();
 }
 
+TEST(objectscript_routine_calls_macro) {
+    CBMFileResult *r = extract(
+        "UTILS\n"
+        "    Set sc = $$$OK\n"
+        "    If $$$ISERR(sc) { Quit sc }\n"
+        "    Quit\n",
+        CBM_LANG_OBJECTSCRIPT_ROUTINE, "t", "Utils.mac");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    int found_iserr = 0;
+    for (int i = 0; i < r->calls.count; i++) {
+        const char *cn = r->calls.items[i].callee_name;
+        if (cn && strstr(cn, "ISERR")) {
+            found_iserr = 1;
+        }
+    }
+    ASSERT_TRUE(found_iserr);
+    cbm_free_result(r);
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
@@ -2574,6 +2597,7 @@ SUITE(extraction) {
     RUN_TEST(objectscript_routine_tags);
     RUN_TEST(objectscript_udl_calls_literal);
     RUN_TEST(objectscript_routine_calls_tag);
+    RUN_TEST(objectscript_routine_calls_macro);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
