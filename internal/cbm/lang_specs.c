@@ -1525,7 +1525,8 @@ static const char *objectscript_udl_call_types[]    = {"class_method_call", "ins
 static const char *objectscript_udl_module_types[]  = {"source_file", NULL};
 
 static const char *objectscript_routine_func_types[]   = {"tag", NULL};
-static const char *objectscript_routine_call_types[]   = {"extrinsic_function", "routine_tag_call", NULL};
+static const char *objectscript_routine_call_types[]   = {"extrinsic_function", "routine_tag_call",
+                                                          "class_method_call", "macro", NULL};
 static const char *objectscript_routine_module_types[] = {"source_file", NULL};
 
 // ==================== SPEC TABLE ====================
