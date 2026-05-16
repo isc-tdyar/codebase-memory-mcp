@@ -3671,7 +3671,7 @@ TEST(k8s_extract_kustomize) {
                       "  - deployment.yaml\n"
                       "  - service.yaml\n";
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_KUSTOMIZE, "myproj",
-                                        "base/kustomization.yaml", 0, NULL, NULL);
+                                        "base/kustomization.yaml", 0, NULL, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT_GTE(r->imports.count, 2);
 
@@ -3698,7 +3698,7 @@ TEST(k8s_extract_manifest) {
                       "  name: my-app\n"
                       "  namespace: production\n";
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
-                                        "k8s/deployment.yaml", 0, NULL, NULL);
+                                        "k8s/deployment.yaml", 0, NULL, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT_GTE(r->defs.count, 1);
 
@@ -3717,7 +3717,7 @@ TEST(k8s_extract_manifest) {
 TEST(k8s_extract_manifest_no_name) {
     const char *src = "apiVersion: apps/v1\nkind: Deployment\n";
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
-                                        "k8s/deploy.yaml", 0, NULL, NULL);
+                                        "k8s/deploy.yaml", 0, NULL, NULL, NULL);
     ASSERT(r != NULL);
     /* No crash — defs count may be 0 because metadata.name is absent */
     ASSERT(!r->has_error);
@@ -3745,7 +3745,7 @@ TEST(k8s_extract_manifest_multidoc) {
                       "metadata:\n"
                       "  name: my-svc\n";
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
-                                        "k8s/multi.yaml", 0, NULL, NULL);
+                                        "k8s/multi.yaml", 0, NULL, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT(!r->has_error);
     /* First document's resource must be present */

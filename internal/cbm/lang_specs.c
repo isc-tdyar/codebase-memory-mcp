@@ -1523,7 +1523,7 @@ static const char *objectscript_udl_class_types[]   = {"class_definition", NULL}
 static const char *objectscript_udl_field_types[]   = {"property", "parameter",
                                                         "index", "trigger", "xdata",
                                                         "storage", "foreignkey", NULL};
-static const char *objectscript_udl_call_types[]    = {"class_method_call", "instance_method_call", NULL};
+static const char *objectscript_udl_call_types[]    = {"class_method_call", "instance_method_call", "macro", NULL};
 static const char *objectscript_udl_module_types[]  = {"source_file", NULL};
 
 static const char *objectscript_routine_func_types[]   = {"tag", NULL};

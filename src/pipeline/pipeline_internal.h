@@ -14,6 +14,7 @@
 #include "discover/discover.h"
 #include "foundation/hash_table.h"
 #include "cbm.h"
+#include "macro_table.h"
 #include <stdatomic.h>
 
 /* ── Shared pipeline constants ─────────────────────────────────── */
@@ -68,6 +69,8 @@ typedef struct {
      * configs are an easy follow-on). NULL when no usable configs were found.
      * Owned by pipeline.c / pipeline_incremental.c. */
     const cbm_path_alias_collection_t *path_aliases;
+
+    const CBMMacroTable *macro_table;
 } cbm_pipeline_ctx_t;
 
 /* Get the current pipeline's package map (NULL if none). */

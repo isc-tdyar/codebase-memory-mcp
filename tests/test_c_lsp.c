@@ -46,11 +46,11 @@ static int count_resolved(const CBMFileResult *r, const char *callerSub, const c
 
 /* Wrapper: extract C source, return -1 length to auto-compute strlen */
 static CBMFileResult *extract_c(const char *src) {
-    return cbm_extract_file(src, (int)strlen(src), CBM_LANG_C, "test", "main.c", 0, NULL, NULL);
+    return cbm_extract_file(src, (int)strlen(src), CBM_LANG_C, "test", "main.c", 0, NULL, NULL, NULL);
 }
 
 static CBMFileResult *extract_cpp(const char *src) {
-    return cbm_extract_file(src, (int)strlen(src), CBM_LANG_CPP, "test", "main.cpp", 0, NULL, NULL);
+    return cbm_extract_file(src, (int)strlen(src), CBM_LANG_CPP, "test", "main.cpp", 0, NULL, NULL, NULL);
 }
 
 TEST(clsp_simple_var_decl) {
@@ -572,7 +572,7 @@ TEST(clsp_nocrash_nested_namespace) {
 }
 
 TEST(clsp_nocrash_empty_source) {
-    CBMFileResult *r = cbm_extract_file("", 0, CBM_LANG_CPP, "test", "main.cpp", 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file("", 0, CBM_LANG_CPP, "test", "main.cpp", 0, NULL, NULL, NULL);
     ASSERT_NOT_NULL(r);
     cbm_free_result(r);
     PASS();

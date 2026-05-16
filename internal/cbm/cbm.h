@@ -461,6 +461,8 @@ typedef struct {
     int count;
 } CBMStringConstantMap;
 
+typedef struct CBMMacroTable CBMMacroTable;
+
 typedef struct {
     CBMArena *arena;
     CBMFileResult *result;
@@ -471,9 +473,10 @@ typedef struct {
     const char *rel_path;
     const char *module_qn;
     TSNode root;
-    EFCache ef_cache;                      // enclosing function cache
-    const char *enclosing_class_qn;        // for nested class QN computation
-    CBMStringConstantMap string_constants; // module-level NAME = "value" pairs
+    EFCache ef_cache;
+    const char *enclosing_class_qn;
+    CBMStringConstantMap string_constants;
+    const CBMMacroTable *macro_table;
 } CBMExtractCtx;
 
 // --- Public API ---
@@ -486,8 +489,9 @@ int cbm_init(void);
 // timeout_micros: per-file parse timeout in microseconds (0 = no timeout).
 CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage language,
                                 const char *project, const char *rel_path, int64_t timeout_micros,
-                                const char **extra_defines, // NULL-terminated, or NULL
-                                const char **include_paths  // NULL-terminated, or NULL
+                                const char **extra_defines,
+                                const char **include_paths,
+                                const CBMMacroTable *macro_table
 );
 
 // Free all memory associated with a result.

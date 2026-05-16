@@ -39,6 +39,7 @@ enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 6, P
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
+#include "macro_table.h"
 
 static inline void *intptr_to_ptr(intptr_t v) {
     void *p;
@@ -514,6 +515,48 @@ static int seq_pass_lsp_cross_dispatch(cbm_pipeline_ctx_t *ctx,
     return cbm_pipeline_pass_lsp_cross(ctx, files, file_count, ctx->result_cache);
 }
 
+/* Build macro table from .inc files in the file list.
+ * Returns NULL if no .inc files found. Caller must free(). */
+static CBMMacroTable *cbm_build_macro_table_from_files(const cbm_file_info_t *files, int count,
+                                                       const char *repo_path) {
+    (void)repo_path;
+    bool has_inc = false;
+    for (int i = 0; i < count; i++) {
+        if (files[i].language == CBM_LANG_OBJECTSCRIPT_ROUTINE &&
+            files[i].path && strstr(files[i].path, ".inc")) {
+            has_inc = true;
+            break;
+        }
+    }
+    if (!has_inc) return NULL;
+
+    CBMMacroTable *mt = (CBMMacroTable *)calloc(1, sizeof(CBMMacroTable));
+    if (!mt) return NULL;
+
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    cbm_macro_table_init_system(mt);
+
+    for (int i = 0; i < count; i++) {
+        if (files[i].language != CBM_LANG_OBJECTSCRIPT_ROUTINE) continue;
+        if (!files[i].path || !strstr(files[i].path, ".inc")) continue;
+        FILE *f = fopen(files[i].path, "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        rewind(f);
+        char *src = (char *)malloc(fsize + 1);
+        if (src) {
+            size_t nread = fread(src, 1, fsize, f);
+            src[nread] = '\0';
+            cbm_parse_inc_file(mt, &arena, src);
+            free(src);
+        }
+        fclose(f);
+    }
+    return mt;
+}
+
 /* Run the sequential pipeline path: definitions, k8s, lsp_cross, calls, usages, semantic. */
 static int run_sequential_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
                                    const cbm_file_info_t *files, int file_count,
@@ -527,6 +570,11 @@ static int run_sequential_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
     CBMFileResult **seq_cache = (CBMFileResult **)calloc(file_count, sizeof(CBMFileResult *));
     if (seq_cache) {
         ctx->result_cache = seq_cache;
+    }
+
+    CBMMacroTable *mt = cbm_build_macro_table_from_files(files, file_count, ctx->repo_path);
+    if (mt) {
+        ctx->macro_table = mt;
     }
     typedef int (*seq_pass_fn)(cbm_pipeline_ctx_t *, const cbm_file_info_t *, int);
     static const struct {

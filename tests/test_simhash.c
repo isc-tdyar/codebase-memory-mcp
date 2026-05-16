@@ -28,7 +28,7 @@
 /* Extract a single file and return the result.  Caller frees. */
 static CBMFileResult *extract_one(const char *src, CBMLanguage lang, const char *proj,
                                   const char *path) {
-    return cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL);
+    return cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL);
 }
 
 /* Find a definition by name in an extraction result. */

@@ -7,6 +7,7 @@
  */
 #include "test_framework.h"
 #include "cbm.h"
+#include "macro_table.h"
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -60,7 +61,13 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL);
+    return r;
+}
+
+static CBMFileResult *extract_with_macros(const char *src, CBMLanguage lang, const char *proj,
+                                          const char *path, const CBMMacroTable *mt) {
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, mt);
     return r;
 }
 
@@ -1720,6 +1727,84 @@ TEST(objectscript_udl_calls_typed_property) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ * Group H2: ObjectScript macro expansion
+ * ═══════════════════════════════════════════════════════════════════ */
+
+TEST(objectscript_macro_expand_system) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run(sc As %Status) As %Status\n"
+        "{\n"
+        "    If $$$ISERR(sc) { Quit sc }\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "%SYSTEM.Status.IsError"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_macro_expand_local) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    const char *inc_content =
+        "ROUTINE MyApp.Include [Type=INC]\n"
+        "#define MyCheck(%sc) ##class(MyApp.Utils).Validate(%sc)\n";
+    cbm_parse_inc_file(&mt, &arena, inc_content);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run(sc As %Status) As %Status\n"
+        "{\n"
+        "    If $$$MyCheck(sc) { Quit $$$OK }\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "MyApp.Utils.Validate"));
+    cbm_free_result(r);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+TEST(objectscript_macro_constant_no_extra_call) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    const char *inc_content =
+        "ROUTINE MyApp.Include [Type=INC]\n"
+        "#define MyConst 42\n";
+    cbm_parse_inc_file(&mt, &arena, inc_content);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Integer\n"
+        "{\n"
+        "    Set x = $$$MyConst\n"
+        "    Quit x\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(!has_call(r, "$$$MyConst"));
+    cbm_free_result(r);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
 
@@ -2644,6 +2729,9 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
+    RUN_TEST(objectscript_macro_expand_system);
+    RUN_TEST(objectscript_macro_expand_local);
+    RUN_TEST(objectscript_macro_constant_no_extra_call);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);

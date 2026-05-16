@@ -1,8 +1,9 @@
 #include "cbm.h"
-#include "arena.h" // CBMArena, cbm_arena_sprintf
+#include "arena.h"
 #include "helpers.h"
 #include "lang_specs.h"
 #include "extract_unified.h"
+#include "macro_table.h"
 #include "foundation/constants.h"
 #include "extract_node_stack.h"
 #include "tree_sitter/api.h" // TSNode, ts_node_*
@@ -786,6 +787,22 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
             strcmp(ts_node_type(node), "instance_method_call") == 0) {
             callee = resolve_objectscript_instance_call(ctx->arena, node, ctx->source,
                                                        &state->os_type_map);
+        }
+
+        if (callee && callee[0] == '$' && callee[1] == '$' && callee[2] == '$' &&
+            ctx->macro_table) {
+            const char *macro_name = callee + 3;
+            const CBMMacroEntry *entry = cbm_macro_table_find(ctx->macro_table, macro_name);
+            if (entry) {
+                if (entry->resolved_callee) {
+                    callee = cbm_arena_strdup(ctx->arena, entry->resolved_callee);
+                } else if (entry->expansion) {
+                    char *resolved = cbm_macro_extract_callee(ctx->arena, entry->expansion);
+                    callee = resolved;
+                } else {
+                    callee = NULL;
+                }
+            }
         }
 
         if (callee && callee[0] && !cbm_is_keyword(callee, ctx->language)) {
