@@ -1720,6 +1720,74 @@ TEST(objectscript_udl_calls_typed_property) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ * Group H3: ObjectScript DATA_FLOWS argument extraction
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static int find_call_args(const CBMFileResult *r, const char *callee,
+                          const char **out_arg0, const char **out_arg1) {
+    if (out_arg0) *out_arg0 = NULL;
+    if (out_arg1) *out_arg1 = NULL;
+    for (int i = 0; i < r->calls.count; i++) {
+        if (strstr(r->calls.items[i].callee_name, callee)) {
+            if (out_arg0 && r->calls.items[i].arg_count > 0)
+                *out_arg0 = r->calls.items[i].args[0].expr;
+            if (out_arg1 && r->calls.items[i].arg_count > 1)
+                *out_arg1 = r->calls.items[i].args[1].expr;
+            return r->calls.items[i].arg_count;
+        }
+    }
+    return -1;
+}
+
+TEST(objectscript_data_flows_class_method_args) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set sql = \"SELECT 1\"\n"
+        "    Do ##class(MyApp.Utils).Transform(sql, \"JSON\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "MyApp.Utils.Transform"));
+    const char *arg0 = NULL;
+    const char *arg1 = NULL;
+    int argc = find_call_args(r, "MyApp.Utils.Transform", &arg0, &arg1);
+    ASSERT(argc == 2);
+    ASSERT_NOT_NULL(arg0);
+    ASSERT(strstr(arg0, "sql") != NULL);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_data_flows_instance_method_args) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set adapter = ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "    Do adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery"));
+    const char *arg0 = NULL;
+    int argc = find_call_args(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery", &arg0, NULL);
+    ASSERT(argc == 1);
+    ASSERT_NOT_NULL(arg0);
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
 
@@ -2644,6 +2712,8 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
+    RUN_TEST(objectscript_data_flows_class_method_args);
+    RUN_TEST(objectscript_data_flows_instance_method_args);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);

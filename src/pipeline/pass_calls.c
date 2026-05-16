@@ -306,6 +306,21 @@ static void emit_classified_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
              esc_c2, res->confidence, res->strategy ? res->strategy : "unknown",
              res->candidate_count);
     cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "CALLS", props);
+
+    if (call->arg_count > 0) {
+        char args_prop[CBM_SZ_512];
+        int apos = 0;
+        apos += snprintf(args_prop + apos, sizeof(args_prop) - apos, "{\"args\":\"");
+        for (int ai = 0; ai < call->arg_count && ai < CBM_MAX_CALL_ARGS; ai++) {
+            const char *expr = call->args[ai].expr ? call->args[ai].expr : "";
+            char esc_arg[128];
+            cbm_json_escape(esc_arg, sizeof(esc_arg), expr);
+            apos += snprintf(args_prop + apos, sizeof(args_prop) - apos,
+                             ai > 0 ? ",%d:%s" : "%d:%s", ai, esc_arg);
+        }
+        snprintf(args_prop + apos, sizeof(args_prop) - apos, "\"}");
+        cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "DATA_FLOWS", args_prop);
+    }
 }
 
 /* Find source node for a call: enclosing function or file node. */

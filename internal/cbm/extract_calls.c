@@ -794,12 +794,43 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
             call.enclosing_func_qn = state->enclosing_func_qn;
 
             TSNode args = ts_node_child_by_field_name(node, TS_FIELD("arguments"));
+            if (ts_node_is_null(args) &&
+                (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                 ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+                TSNode oref = cbm_find_child_by_kind(node, "oref_method");
+                if (!ts_node_is_null(oref)) {
+                    args = cbm_find_child_by_kind(oref, "method_args");
+                }
+                if (ts_node_is_null(args)) {
+                    args = cbm_find_child_by_kind(node, "method_args");
+                }
+            }
             if (!ts_node_is_null(args)) {
                 call.first_string_arg = extract_url_or_topic_arg(ctx, args);
                 if (call.first_string_arg && call.first_string_arg[0] == '/') {
                     call.second_arg_name = extract_handler_arg(ctx, args);
                 }
-                extract_call_args(ctx, args, &call);
+                if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                    ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+                    for (uint32_t ai = 0;
+                         ai < ts_node_named_child_count(args) &&
+                         call.arg_count < CBM_MAX_CALL_ARGS;
+                         ai++) {
+                        TSNode achild = ts_node_named_child(args, ai);
+                        const char *ack = ts_node_type(achild);
+                        if (strcmp(ack, "bracket") == 0) continue;
+                        if (strcmp(ack, "method_arg") != 0) continue;
+                        CBMCallArg *ca = &call.args[call.arg_count];
+                        memset(ca, 0, sizeof(*ca));
+                        ca->index = call.arg_count;
+                        ca->expr = cbm_node_text(ctx->arena, achild, ctx->source);
+                        if (ca->expr && ca->expr[0]) {
+                            call.arg_count++;
+                        }
+                    }
+                } else {
+                    extract_call_args(ctx, args, &call);
+                }
             }
 
             cbm_calls_push(&ctx->result->calls, ctx->arena, call);
