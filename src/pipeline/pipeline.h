@@ -31,9 +31,10 @@ typedef struct cbm_pipeline cbm_pipeline_t;
 #ifndef CBM_INDEX_MODE_T_DEFINED
 #define CBM_INDEX_MODE_T_DEFINED
 typedef enum {
-    CBM_MODE_FULL = 0,     /* Full: everything including SIMILAR_TO + SEMANTICALLY_RELATED */
-    CBM_MODE_MODERATE = 1, /* Moderate: fast discovery + SIMILAR_TO + SEMANTICALLY_RELATED */
-    CBM_MODE_FAST = 2,     /* Fast: skip non-essential files, no similarity/semantic edges */
+    CBM_MODE_FULL       = 0,
+    CBM_MODE_MODERATE   = 1,
+    CBM_MODE_FAST       = 2,
+    CBM_MODE_DICTIONARY = 3,
 } cbm_index_mode_t;
 #endif
 
@@ -45,6 +46,13 @@ cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path, cbm
 /* Enable persistent artifact export (.codebase-memory/graph.db.zst).
  * When enabled, the pipeline writes a compressed artifact after indexing. */
 void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled);
+
+/* Configure IRIS %Dictionary ingest. All strings are copied; pass NULL to disable.
+ * port defaults to 1972 if <= 0. pkg_filter restricts to classes starting with prefix. */
+void cbm_pipeline_set_iris(cbm_pipeline_t *p,
+                           const char *host, int port,
+                           const char *ns, const char *user,
+                           const char *pass, const char *pkg_filter);
 
 /* Free a pipeline and all its internal state. NULL-safe. */
 void cbm_pipeline_free(cbm_pipeline_t *p);
