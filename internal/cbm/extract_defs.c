@@ -2201,6 +2201,7 @@ static TSNode resolve_method_name(TSNode child, CBMLanguage lang) {
         return cbm_find_child_by_kind(child, "simple_identifier");
     }
 
+<<<<<<< HEAD
         if (lang == CBM_LANG_OBJECTSCRIPT_UDL &&
             (strcmp(ck, "method") == 0 || strcmp(ck, "classmethod") == 0)) {
             TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
@@ -2214,6 +2215,18 @@ static TSNode resolve_method_name(TSNode child, CBMLanguage lang) {
         if (lang == CBM_LANG_OBJECTSCRIPT_UDL && strcmp(ck, "query") == 0) {
             return cbm_find_child_by_kind(child, "query_name");
         }
+=======
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL &&
+        (strcmp(ck, "method") == 0 || strcmp(ck, "classmethod") == 0)) {
+        TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
+        if (!ts_node_is_null(mdef)) {
+            TSNode mname = cbm_find_child_by_kind(mdef, "method_name");
+            if (!ts_node_is_null(mname) && ts_node_named_child_count(mname) > 0) {
+                return ts_node_named_child(mname, 0);
+            }
+        }
+    }
+>>>>>>> fork/008-update-objectscript-grammar-v1-8-0
 
     if (strcmp(ck, "arrow_function") == 0) {
         return resolve_arrow_func_name(child);
@@ -3456,6 +3469,7 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
             continue;
         }
 
+<<<<<<< HEAD
         if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL) {
             const char *ntype = ts_node_type(child);
             const char *name_child_kind = NULL;
@@ -3487,6 +3501,16 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
             }
         }
 
+=======
+        /* Locate the field's "type" + name node. Two shapes:
+         *   - direct (Java/Go/Rust/C/C++):
+         *       field_declaration .type=identifier .declarator=variable_declarator(.name)
+         *   - nested (C#):
+         *       field_declaration > variable_declaration(.type=identifier,
+         *                                               variable_declarator(.name))
+         * For the nested case, the child has no "type" field directly. Detect by
+         * walking named children for a variable_declaration. */
+>>>>>>> fork/008-update-objectscript-grammar-v1-8-0
         TSNode type_node = ts_node_child_by_field_name(child, TS_FIELD("type"));
         TSNode name_node = ts_node_is_null(type_node) ? (TSNode){0} : resolve_field_name_node(child);
 

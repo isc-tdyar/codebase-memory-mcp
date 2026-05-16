@@ -1518,11 +1518,17 @@ static const char *pine_branch_types[] = {"if_statement",       "switch_statemen
                                           "for_in_statement",   "while_statement",  NULL};
 static const char *pine_assign_types[] = {"reassignment_statement", NULL};
 // Node names verified against intersystems/tree-sitter-objectscript grammar.
+<<<<<<< HEAD
 static const char *objectscript_udl_func_types[]    = {"method", "classmethod", "query", NULL};
 static const char *objectscript_udl_class_types[]   = {"class_definition", NULL};
 static const char *objectscript_udl_field_types[]   = {"property", "parameter",
                                                         "index", "trigger", "xdata",
                                                         "storage", "foreignkey", NULL};
+=======
+static const char *objectscript_udl_func_types[]    = {"method", "classmethod", NULL};
+static const char *objectscript_udl_class_types[]   = {"class_definition", NULL};
+static const char *objectscript_udl_field_types[]   = {"property", "parameter", NULL};
+>>>>>>> fork/008-update-objectscript-grammar-v1-8-0
 static const char *objectscript_udl_call_types[]    = {"class_method_call", "instance_method_call", NULL};
 static const char *objectscript_udl_module_types[]  = {"source_file", NULL};
 

@@ -1605,6 +1605,7 @@ TEST(objectscript_routine_tags) {
     PASS();
 }
 
+<<<<<<< HEAD
 TEST(objectscript_udl_query_member) {
     CBMFileResult *r = extract(
         "Class MyApp.Repo Extends %Persistent\n"
@@ -1663,6 +1664,8 @@ TEST(objectscript_udl_trigger_member) {
     PASS();
 }
 
+=======
+>>>>>>> fork/008-update-objectscript-grammar-v1-8-0
 /* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
@@ -2581,10 +2584,13 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_multiple_bases);
     RUN_TEST(objectscript_udl_properties);
     RUN_TEST(objectscript_routine_tags);
+<<<<<<< HEAD
     RUN_TEST(objectscript_udl_query_member);
     RUN_TEST(objectscript_udl_index_member);
     RUN_TEST(objectscript_udl_xdata_member);
     RUN_TEST(objectscript_udl_trigger_member);
+=======
+>>>>>>> fork/008-update-objectscript-grammar-v1-8-0
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
