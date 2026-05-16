@@ -17,8 +17,7 @@
 
 /* Extract a Go file using cbm_extract_file (runs single-file LSP internally) */
 static CBMFileResult *extract_go(const char *source) {
-    return cbm_extract_file(source, (int)strlen(source), CBM_LANG_GO, "test", "main.go", 0, NULL,
-                            NULL);
+    return cbm_extract_file(source, (int)strlen(source), CBM_LANG_GO, "test", "main.go", 0, NULL, NULL, NULL, NULL);
 }
 
 /* Search resolved_calls for a match where caller contains callerSub

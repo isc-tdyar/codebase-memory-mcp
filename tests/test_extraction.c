@@ -60,7 +60,7 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
     return r;
 }
 

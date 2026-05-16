@@ -15,7 +15,7 @@
 
 static CBMFileResult *extract_py(const char *source) {
     return cbm_extract_file(source, (int)strlen(source), CBM_LANG_PYTHON,
-                            "test", "main.py", 0, NULL, NULL);
+                            "test", "main.py", 0, NULL, NULL, NULL, NULL);
 }
 
 static int find_resolved(const CBMFileResult *r, const char *callerSub, const char *calleeSub) {

@@ -35,7 +35,12 @@
     {
       "id": "m06-013-macros-rttypes-dataflows",
       "commit": "516677c",
-      "label": "013 \u2014 Macros + ReturnTypes + DATA_FLOWS"
+      "label": "013 \u2014 Macros + ReturnTypes + DATA_FLOWS (sequential only)"
+    },
+    {
+      "id": "m07-014-parallel-wiring",
+      "commit": null,
+      "label": "014 \u2014 Full parallel mode wiring (all features in large repos)"
     }
   ],
   "queries": {

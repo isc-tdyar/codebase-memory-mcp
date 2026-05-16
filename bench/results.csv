@@ -1,8 +1,9 @@
 id,label,commit,classes,methods,variables,indexes,xdata,storage,calls,inherits,data_flows,elapsed_s
-m00-upstream-base,Upstream baseline (pre-ObjectScript),01c97eb,771,2106,1937,0,0,0,1643,171,0,3.3
-m01-001-udl-grammar,001 — UDL + routine grammar,b60a571,771,2106,1937,0,0,0,376,0,0,3.4
-m02-004-calls-static,004 — Static CALLS (##class literal),372a2c3,771,2106,1937,0,0,0,1643,171,0,3.4
-m03-005-calls-deep,005 — Deep CALLS ($$$macro + .INT),bbcc73f,771,2106,1937,0,0,0,1643,171,0,3.4
-m04-009-all-pre-010,009 — All features pre-type-inference,00b7376,627,2115,1947,52,40,87,1643,156,0,3.2
-m05-010-type-inference,010 — Type inference (Set x = ##class().%New()),4ecbbd2,627,2115,1947,52,40,87,1656,156,0,3.2
-m06-013-macros-rttypes-dataflows,013 — Macros + ReturnTypes + DATA_FLOWS,516677c,627,2115,1947,52,40,87,1656,156,0,3.4
+m00-upstream-base,Upstream baseline (pre-ObjectScript),01c97eb,771,2106,1937,0,0,0,1643,171,0,0.1
+m01-001-udl-grammar,001 — UDL + routine grammar,b60a571,771,2106,1937,0,0,0,376,0,0,0.0
+m02-004-calls-static,004 — Static CALLS (##class literal),372a2c3,771,2106,1937,0,0,0,1643,171,0,0.1
+m03-005-calls-deep,005 — Deep CALLS ($$$macro + .INT),bbcc73f,771,2106,1937,0,0,0,1643,171,0,0.1
+m04-009-all-pre-010,009 — All features pre-type-inference,00b7376,627,2115,1947,52,40,87,1643,156,0,0.1
+m05-010-type-inference,010 — Type inference (Set x = ##class().%New()),4ecbbd2,627,2115,1947,52,40,87,1656,156,0,0.0
+m06-013-macros-rttypes-dataflows,013 — Macros + ReturnTypes + DATA_FLOWS (sequential only),516677c,627,2115,1947,52,40,87,1656,156,0,0.0
+m07-014-parallel-wiring,014 — Full parallel mode wiring (all features in large repos),HEAD,627,2115,1947,52,40,87,1940,156,1149,3.8

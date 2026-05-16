@@ -23,8 +23,7 @@
 /* ── Helpers ───────────────────────────────────────────────────── */
 
 static CBMFileResult *extract_php(const char *source) {
-    return cbm_extract_file(source, (int)strlen(source), CBM_LANG_PHP, "test", "main.php", 0, NULL,
-                            NULL);
+    return cbm_extract_file(source, (int)strlen(source), CBM_LANG_PHP, "test", "main.php", 0, NULL, NULL, NULL, NULL);
 }
 
 static int find_resolved(const CBMFileResult *r, const char *callerSub, const char *calleeSub) {

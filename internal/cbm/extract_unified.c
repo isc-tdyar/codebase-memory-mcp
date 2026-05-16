@@ -143,10 +143,6 @@ static void handle_objectscript_type_map(CBMExtractCtx *ctx, TSNode node, WalkSt
             if (!method_text) {
                 continue;
             }
-            if (strcasecmp(method_text, "%New") != 0 && strcasecmp(method_text, "%OpenId") != 0 &&
-                strcasecmp(method_text, "%Open") != 0) {
-                continue;
-            }
 
             TSNode class_ref = cbm_find_child_by_kind(cm_call, "class_ref");
             if (ts_node_is_null(class_ref)) {
@@ -159,6 +155,27 @@ static void handle_objectscript_type_map(CBMExtractCtx *ctx, TSNode node, WalkSt
             char *cls = cbm_node_text(ctx->arena, cname, ctx->source);
             if (!cls || !cls[0]) {
                 continue;
+            }
+
+            bool is_constructor = (strcasecmp(method_text, "%New") == 0 ||
+                                   strcasecmp(method_text, "%OpenId") == 0 ||
+                                   strcasecmp(method_text, "%Open") == 0);
+            if (!is_constructor) {
+                if (!ctx->return_type_table) {
+                    continue;
+                }
+                char *method_qn = cbm_arena_sprintf(ctx->arena, "%s.%s", cls, method_text);
+                for (int rti = 0; rti < ctx->return_type_table->count; rti++) {
+                    if (strcasecmp(ctx->return_type_table->entries[rti].method_qn, method_qn) == 0) {
+                        cls = cbm_arena_strdup(ctx->arena,
+                                               ctx->return_type_table->entries[rti].return_type);
+                        is_constructor = true;
+                        break;
+                    }
+                }
+                if (!is_constructor) {
+                    continue;
+                }
             }
 
             TSNode var_node = lhs;

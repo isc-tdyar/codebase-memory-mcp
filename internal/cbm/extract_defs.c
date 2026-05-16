@@ -2265,6 +2265,20 @@ static void push_method_def(CBMExtractCtx *ctx, TSNode child, const char *class_
         }
     }
 
+    if (!def.return_type &&
+        (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+         ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+        TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
+        if (ts_node_is_null(mdef)) mdef = child;
+        TSNode rt_node = cbm_find_child_by_kind(mdef, "return_type");
+        if (!ts_node_is_null(rt_node)) {
+            TSNode tname = cbm_find_child_by_kind(rt_node, "typename");
+            if (!ts_node_is_null(tname)) {
+                def.return_type = cbm_node_text(a, tname, ctx->source);
+            }
+        }
+    }
+
     // C++: trailing return type (auto method() -> Type)
     if (def.return_type && strcmp(def.return_type, "auto") == 0 &&
         (ctx->language == CBM_LANG_CPP || ctx->language == CBM_LANG_CUDA)) {

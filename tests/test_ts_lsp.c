@@ -28,7 +28,7 @@
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
 static CBMFileResult *extract_with(const char *source, CBMLanguage lang, const char *fname) {
-    return cbm_extract_file(source, (int)strlen(source), lang, "test", fname, 0, NULL, NULL);
+    return cbm_extract_file(source, (int)strlen(source), lang, "test", fname, 0, NULL, NULL, NULL, NULL);
 }
 
 static CBMFileResult *extract_ts(const char *source) {

@@ -53,11 +53,54 @@ enum { PP_CSHARP_M_PREFIX_LEN = 2 };
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "macro_table.h"
 
 static uint64_t extract_now_ns(void) {
     struct timespec ts;
     cbm_clock_gettime(CLOCK_MONOTONIC, &ts);
     return ((uint64_t)ts.tv_sec * PP_NSEC_PER_SEC) + (uint64_t)ts.tv_nsec;
+}
+
+static const char *SCALAR_RETURN_TYPES[] = {
+    "%String", "%Integer", "%Float", "%Boolean", "%Status",
+    "%Numeric", "%Date", "%Time", "%TimeStamp", "%Binary", NULL
+};
+
+static CBMReturnTypeTable *build_return_type_table(const cbm_gbuf_t *gbuf) {
+    if (!gbuf) return NULL;
+    const cbm_gbuf_node_t **nodes = NULL;
+    int count = cbm_gbuf_find_by_label(gbuf, "Method", &nodes, 0);
+    if (count <= 0 || !nodes) return NULL;
+    CBMReturnTypeTable *rtt = (CBMReturnTypeTable *)calloc(1, sizeof(CBMReturnTypeTable));
+    if (!rtt) { free(nodes); return NULL; }
+    for (int i = 0; i < count && rtt->count < CBM_RETURN_TYPE_TABLE_CAP; i++) {
+        const cbm_gbuf_node_t *n = nodes[i];
+        if (!n->qualified_name || !n->properties_json) continue;
+        const char *p = strstr(n->properties_json, "\"return_type\":");
+        if (!p) continue;
+        p += 14;
+        while (*p == ' ') p++;
+        if (*p != '"') continue;
+        p++;
+        const char *end = strchr(p, '"');
+        if (!end) continue;
+        int rtlen = (int)(end - p);
+        if (rtlen <= 0 || rtlen > 255) continue;
+        char rt[256];
+        memcpy(rt, p, rtlen);
+        rt[rtlen] = '\0';
+        bool skip = false;
+        for (int si = 0; SCALAR_RETURN_TYPES[si]; si++) {
+            if (strcmp(rt, SCALAR_RETURN_TYPES[si]) == 0) { skip = true; break; }
+        }
+        if (skip) continue;
+        rtt->entries[rtt->count].method_qn = n->qualified_name;
+        rtt->entries[rtt->count].return_type = strdup(rt);
+        rtt->count++;
+    }
+    free(nodes);
+    if (rtt->count == 0) { free(rtt); return NULL; }
+    return rtt;
 }
 
 /* ── Helpers (duplicated from pass files — kept static for isolation) ── */
@@ -401,7 +444,9 @@ typedef struct {
     _Atomic int *cancelled;
     _Atomic int next_file_idx;
 
-    cbm_pkg_entries_t *pkg_entries; /* per-worker manifest arrays (separate allocation) */
+    cbm_pkg_entries_t *pkg_entries;
+    const CBMMacroTable *macro_table;
+    const CBMReturnTypeTable *return_type_table;
 } extract_ctx_t;
 
 /* Insert one definition node (and its route if present) into the local gbuf. */
@@ -484,7 +529,8 @@ static void extract_worker(int worker_id, void *ctx_ptr) {
         uint64_t file_t0 = extract_now_ns();
 
         CBMFileResult *result = cbm_extract_file(source, source_len, fi->language, ec->project_name,
-                                                 fi->rel_path, CBM_EXTRACT_BUDGET, NULL, NULL);
+                                                 fi->rel_path, CBM_EXTRACT_BUDGET, NULL, NULL,
+                                                 ec->macro_table, ec->return_type_table);
 
         uint64_t file_elapsed_ms = (extract_now_ns() - file_t0) / PP_USEC_PER_MS;
 
@@ -620,6 +666,33 @@ int cbm_parallel_extract(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
     /* Per-worker manifest entry arrays (separate from cache-line-aligned worker state) */
     cbm_pkg_entries_t *pkg_entries = calloc(worker_count, sizeof(cbm_pkg_entries_t));
 
+    /* Build .inc macro table from any .inc files in this project */
+    CBMMacroTable *macro_table_owned = NULL;
+    bool has_inc = false;
+    for (int i = 0; i < file_count && !has_inc; i++) {
+        if (files[i].language == CBM_LANG_OBJECTSCRIPT_ROUTINE &&
+            files[i].path && strstr(files[i].path, ".inc")) {
+            has_inc = true;
+        }
+    }
+    if (has_inc) {
+        macro_table_owned = (CBMMacroTable *)calloc(1, sizeof(CBMMacroTable));
+        if (macro_table_owned) {
+            CBMArena mt_arena;
+            cbm_arena_init(&mt_arena);
+            cbm_macro_table_init_system(macro_table_owned);
+            for (int i = 0; i < file_count; i++) {
+                if (files[i].language != CBM_LANG_OBJECTSCRIPT_ROUTINE) continue;
+                if (!files[i].path || !strstr(files[i].path, ".inc")) continue;
+                int slen = 0;
+                char *src = read_file(files[i].path, &slen);
+                if (!src) continue;
+                cbm_parse_inc_file(macro_table_owned, &mt_arena, src);
+                free(src);
+            }
+        }
+    }
+
     extract_ctx_t ec = {
         .files = files,
         .sorted = sorted,
@@ -632,6 +705,8 @@ int cbm_parallel_extract(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
         .shared_ids = shared_ids,
         .cancelled = ctx->cancelled,
         .pkg_entries = pkg_entries,
+        .macro_table = macro_table_owned,
+        .return_type_table = ctx->return_type_table,
     };
     atomic_init(&ec.next_worker_id, 0);
     atomic_init(&ec.next_file_idx, 0);
@@ -840,6 +915,7 @@ typedef struct {
     _Atomic int64_t *shared_ids;
     _Atomic int *cancelled;
     _Atomic int next_file_idx;
+    const CBMReturnTypeTable *return_type_table;
 } resolve_ctx_t;
 
 /* Minimum buffer space needed per arg JSON object */
@@ -979,6 +1055,25 @@ static void finalize_and_emit(cbm_gbuf_t *gbuf, int64_t src_id, int64_t tgt_id,
         }
     }
     cbm_gbuf_insert_edge(gbuf, src_id, tgt_id, edge_type, props);
+
+    if (call->arg_count > 0 && strcmp(edge_type, "CALLS") == 0) {
+        char aargs[CBM_SZ_512];
+        int apos = snprintf(aargs, sizeof(aargs), "{\"args\":\"");
+        for (int ai = 0; ai < call->arg_count && ai < CBM_MAX_CALL_ARGS; ai++) {
+            const char *expr = call->args[ai].expr ? call->args[ai].expr : "";
+            char esc[128];
+            cbm_json_escape(esc, sizeof(esc), expr);
+            int w = snprintf(aargs + apos, sizeof(aargs) - apos,
+                             ai > 0 ? ",%d:%s" : "%d:%s", ai, esc);
+            if (w > 0) apos += w;
+        }
+        if (apos < (int)sizeof(aargs) - 2) {
+            aargs[apos++] = '"';
+            aargs[apos++] = '}';
+            aargs[apos] = '\0';
+        }
+        cbm_gbuf_insert_edge(gbuf, src_id, tgt_id, "DATA_FLOWS", aargs);
+    }
 }
 
 /* Build Route node QN and properties for HTTP/async service edges. */
@@ -1781,8 +1876,36 @@ int cbm_parallel_resolve(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
         .registry = ctx->registry,
         .shared_ids = shared_ids,
         .cancelled = ctx->cancelled,
+        .return_type_table = ctx->return_type_table,
     };
     atomic_init(&rc.next_file_idx, 0);
+
+    if (!ctx->return_type_table) {
+        CBMReturnTypeTable *rtt = build_return_type_table(ctx->gbuf);
+        if (rtt) {
+            ctx->return_type_table = rtt;
+            rc.return_type_table = rtt;
+            for (int fi = 0; fi < file_count; fi++) {
+                if (files[fi].language != CBM_LANG_OBJECTSCRIPT_UDL &&
+                    files[fi].language != CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+                    continue;
+                }
+                if (!result_cache || !result_cache[fi]) continue;
+                int slen = 0;
+                char *src = read_file(files[fi].path, &slen);
+                if (!src) continue;
+                CBMFileResult *fresh = cbm_extract_file(src, slen, files[fi].language,
+                                                        ctx->project_name, files[fi].rel_path,
+                                                        CBM_EXTRACT_BUDGET, NULL, NULL,
+                                                        NULL, rtt);
+                free(src);
+                if (fresh) {
+                    cbm_free_result(result_cache[fi]);
+                    result_cache[fi] = fresh;
+                }
+            }
+        }
+    }
 
     /* Sub-phase: Dispatch resolve workers (per-file call/usage resolution, PARALLEL) */
     CBM_PROF_START(t_resolve_dispatch);

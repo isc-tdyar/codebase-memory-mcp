@@ -223,7 +223,7 @@ TEST(pylsp_bench_resolution_ratio) {
     struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     CBMFileResult *r = cbm_extract_file(bench_source, slen, CBM_LANG_PYTHON,
-                                        "test", "bench.py", 0, NULL, NULL);
+                                        "test", "bench.py", 0, NULL, NULL, NULL, NULL);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     ASSERT_NOT_NULL(r);
 
