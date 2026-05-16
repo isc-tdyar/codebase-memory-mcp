@@ -60,7 +60,7 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL);
     return r;
 }
 
@@ -1485,7 +1485,58 @@ TEST(wolfram_nested_def) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- * Group H2: ObjectScript (InterSystems IRIS)
+ * Group H3: ObjectScript return type extraction
+ * ═══════════════════════════════════════════════════════════════════ */
+
+TEST(objectscript_udl_method_return_type) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Factory Extends %RegisteredObject\n"
+        "{\n"
+        "Method GetAdapter() As EnsLib.SQL.OutboundAdapter\n"
+        "{\n"
+        "    Quit ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Factory.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    bool found_rt = false;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "GetAdapter") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].return_type);
+            ASSERT(strstr(r->defs.items[i].return_type, "EnsLib.SQL.OutboundAdapter") != NULL);
+            found_rt = true;
+        }
+    }
+    ASSERT(found_rt);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_scalar_return_type_not_resolved) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Counter Extends %RegisteredObject\n"
+        "{\n"
+        "Method GetName() As %String\n"
+        "{\n"
+        "    Quit \"hello\"\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Counter.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "GetName") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].return_type);
+            ASSERT(strstr(r->defs.items[i].return_type, "%String") != NULL);
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Group H2: ObjectScript macro expansion
  * ═══════════════════════════════════════════════════════════════════ */
 
 TEST(objectscript_udl_class) {
@@ -2644,6 +2695,8 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
+    RUN_TEST(objectscript_udl_method_return_type);
+    RUN_TEST(objectscript_udl_scalar_return_type_not_resolved);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);

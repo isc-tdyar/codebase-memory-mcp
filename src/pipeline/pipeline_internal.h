@@ -68,6 +68,8 @@ typedef struct {
      * configs are an easy follow-on). NULL when no usable configs were found.
      * Owned by pipeline.c / pipeline_incremental.c. */
     const cbm_path_alias_collection_t *path_aliases;
+
+    const CBMReturnTypeTable *return_type_table;
 } cbm_pipeline_ctx_t;
 
 /* Get the current pipeline's package map (NULL if none). */

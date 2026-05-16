@@ -327,7 +327,7 @@ int cbm_pipeline_pass_usages(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *fil
                 continue;
             }
             result = cbm_extract_file(source, source_len, files[i].language, ctx->project_name, rel,
-                                      CBM_EXTRACT_BUDGET, NULL, NULL);
+                                      CBM_EXTRACT_BUDGET, NULL, NULL, NULL);
             free(source);
             if (!result) {
                 errors++;
