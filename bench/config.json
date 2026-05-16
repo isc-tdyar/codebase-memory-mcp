@@ -1,0 +1,52 @@
+{
+  "corpus": "/Users/tdyar/Perforce/tdyar_usmbp16tdyar_4184/healthshare/hscm/15.x",
+  "cbm_cache_base": "/tmp/cbm_bench",
+  "milestones": [
+    {
+      "id": "m00-upstream-base",
+      "commit": "01c97eb",
+      "label": "Upstream baseline (pre-ObjectScript)"
+    },
+    {
+      "id": "m01-001-udl-grammar",
+      "commit": "b60a571",
+      "label": "001 \u2014 UDL + routine grammar"
+    },
+    {
+      "id": "m02-004-calls-static",
+      "commit": "372a2c3",
+      "label": "004 \u2014 Static CALLS (##class literal)"
+    },
+    {
+      "id": "m03-005-calls-deep",
+      "commit": "bbcc73f",
+      "label": "005 \u2014 Deep CALLS ($$$macro + .INT)"
+    },
+    {
+      "id": "m04-009-all-pre-010",
+      "commit": "00b7376",
+      "label": "009 \u2014 All features pre-type-inference"
+    },
+    {
+      "id": "m05-010-type-inference",
+      "commit": "4ecbbd2",
+      "label": "010 \u2014 Type inference (Set x = ##class().%New())"
+    },
+    {
+      "id": "m06-013-macros-rttypes-dataflows",
+      "commit": "516677c",
+      "label": "013 \u2014 Macros + ReturnTypes + DATA_FLOWS"
+    }
+  ],
+  "queries": {
+    "classes":    "MATCH (n:Class) RETURN count(n)",
+    "methods":    "MATCH (n:Method) RETURN count(n)",
+    "variables":  "MATCH (n:Variable) RETURN count(n)",
+    "indexes":    "MATCH (n:Index) RETURN count(n)",
+    "xdata":      "MATCH (n:XData) RETURN count(n)",
+    "storage":    "MATCH (n:Storage) RETURN count(n)",
+    "calls":      "MATCH ()-[r:CALLS]->() RETURN count(r)",
+    "inherits":   "MATCH ()-[r:INHERITS]->() RETURN count(r)",
+    "data_flows": "MATCH ()-[r:DATA_FLOWS]->() RETURN count(r)"
+  }
+}
