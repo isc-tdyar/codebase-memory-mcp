@@ -304,6 +304,7 @@ TEST(groovy_class) {
     ASSERT(has_def(r, "Class", "Greeter"));
     ASSERT(has_def(r, "Method", "greet"));
     cbm_free_result(r);
+
     PASS();
 }
 
@@ -1605,6 +1606,54 @@ TEST(objectscript_routine_tags) {
     PASS();
 }
 
+TEST(objectscript_udl_calls_literal) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "ClassMethod Run() As %Status\n"
+        "{\n"
+        "    Set x = ##class(MyApp.Target).Compute(1)\n"
+        "    Quit x\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    int found = 0;
+    for (int i = 0; i < r->calls.count; i++) {
+        const char *cn = r->calls.items[i].callee_name;
+        if (cn && strstr(cn, "MyApp.Target.Compute")) {
+            found = 1;
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_routine_calls_tag) {
+    CBMFileResult *r = extract(
+        "MAIN\n"
+        "    Do Format^Utils\n"
+        "    Quit\n"
+        "\n"
+        "Format(v)\n"
+        "    Quit v\n",
+        CBM_LANG_OBJECTSCRIPT_ROUTINE, "t", "Main.mac");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    int found = 0;
+    for (int i = 0; i < r->calls.count; i++) {
+        const char *cn = r->calls.items[i].callee_name;
+        if (cn && strstr(cn, "Format")) {
+            found = 1;
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
@@ -2523,6 +2572,8 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_multiple_bases);
     RUN_TEST(objectscript_udl_properties);
     RUN_TEST(objectscript_routine_tags);
+    RUN_TEST(objectscript_udl_calls_literal);
+    RUN_TEST(objectscript_routine_calls_tag);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
