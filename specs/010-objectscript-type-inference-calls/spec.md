@@ -198,3 +198,11 @@ No separate pass needed.
 - Property types are available from the same file's Variable nodes (no cross-file lookup needed for `..Property.Method()` resolution — the property is in the same class).
 - Method `FormalSpec` is parseable from the tree-sitter `arguments` node which contains `<param> As <Type>` patterns.
 - The type map does not need SSA form — last assignment to a variable determines its type for all subsequent uses in the same method.
+
+---
+
+## Clarifications
+
+### Session 2026-05-16
+
+- Q: Should type inference handle forward references within a method body? → A: Single forward pass, no backtracking. ObjectScript is sequential (no hoisting), so Set always precedes usage in valid code. Calls appearing before their Set assignment are silently unresolved. This maintains O(n) complexity.
