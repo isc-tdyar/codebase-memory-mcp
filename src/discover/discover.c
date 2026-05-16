@@ -312,6 +312,20 @@ static CBMLanguage detect_file_language(const char *entry_name, const char *abs_
     if (dot && strcmp(dot, ".cls") == 0) {
         lang = cbm_disambiguate_cls(abs_path);
     }
+    /* Special: .xml files in ObjectScript projects are often IRIS Studio exports
+     * (<Export generator="Cache">) — skip them to avoid false-positive Class nodes. */
+    if (lang == CBM_LANG_XML) {
+        FILE *xf = fopen(abs_path, "r");
+        if (xf) {
+            char xbuf[CBM_SZ_256];
+            size_t xn = fread(xbuf, SKIP_ONE, sizeof(xbuf) - SKIP_ONE, xf);
+            (void)fclose(xf);
+            xbuf[xn] = '\0';
+            if (strstr(xbuf, "<Export generator=")) {
+                return CBM_LANG_COUNT;
+            }
+        }
+    }
     /* Check ignored JSON files */
     if (lang == CBM_LANG_JSON && str_in_list(entry_name, IGNORED_JSON_FILES)) {
         return CBM_LANG_COUNT;
