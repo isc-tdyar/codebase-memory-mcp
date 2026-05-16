@@ -326,6 +326,42 @@ static char *extract_callee_lang_specific(CBMArena *a, TSNode node, const char *
         return extract_swift_callee(a, node, source, nk);
     }
 
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL || lang == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+        if (strcmp(nk, "class_method_call") == 0) {
+            TSNode class_ref = cbm_find_child_by_kind(node, "class_ref");
+            TSNode method_name = cbm_find_child_by_kind(node, "method_name");
+            if (!ts_node_is_null(class_ref) && !ts_node_is_null(method_name)) {
+                TSNode cname = cbm_find_child_by_kind(class_ref, "class_name");
+                if (ts_node_is_null(cname)) {
+                    return NULL;
+                }
+                char *cls = cbm_node_text(a, cname, source);
+                if (!cls || !cls[0]) {
+                    return NULL;
+                }
+                TSNode mname_ident = ts_node_named_child_count(method_name) > 0
+                    ? ts_node_named_child(method_name, 0) : (TSNode){0};
+                if (ts_node_is_null(mname_ident)) {
+                    return cls;
+                }
+                char *meth = cbm_node_text(a, mname_ident, source);
+                if (!meth || !meth[0]) {
+                    return cls;
+                }
+                return cbm_arena_sprintf(a, "%s.%s", cls, meth);
+            }
+            return NULL;
+        }
+        if (strcmp(nk, "routine_tag_call") == 0) {
+            TSNode line_ref = cbm_find_child_by_kind(node, "line_ref");
+            if (!ts_node_is_null(line_ref)) {
+                return cbm_node_text(a, line_ref, source);
+            }
+            return NULL;
+        }
+        return NULL;
+    }
+
     return extract_scripting_callee(a, node, source, lang, nk);
 }
 
