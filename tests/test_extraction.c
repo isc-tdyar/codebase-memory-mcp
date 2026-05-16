@@ -1605,7 +1605,6 @@ TEST(objectscript_routine_tags) {
     PASS();
 }
 
-<<<<<<< HEAD
 TEST(objectscript_udl_query_member) {
     CBMFileResult *r = extract(
         "Class MyApp.Repo Extends %Persistent\n"
@@ -1664,8 +1663,62 @@ TEST(objectscript_udl_trigger_member) {
     PASS();
 }
 
-=======
->>>>>>> fork/008-update-objectscript-grammar-v1-8-0
+TEST(objectscript_udl_calls_typed_new) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set adapter = ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "    Do adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_calls_typed_param) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Handler Extends %RegisteredObject\n"
+        "{\n"
+        "Method Process(req As Ens.Request) As %Status\n"
+        "{\n"
+        "    Do req.Send()\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Handler.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "Ens.Request.Send"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_calls_typed_property) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends Ens.BusinessService\n"
+        "{\n"
+        "Property Adapter As EnsLib.SQL.InboundAdapter;\n"
+        "Method OnProcessInput() As %Status\n"
+        "{\n"
+        "    Do ..Adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.InboundAdapter.ExecuteQuery"));
+    cbm_free_result(r);
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
@@ -2584,13 +2637,13 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_multiple_bases);
     RUN_TEST(objectscript_udl_properties);
     RUN_TEST(objectscript_routine_tags);
-<<<<<<< HEAD
     RUN_TEST(objectscript_udl_query_member);
     RUN_TEST(objectscript_udl_index_member);
     RUN_TEST(objectscript_udl_xdata_member);
     RUN_TEST(objectscript_udl_trigger_member);
-=======
->>>>>>> fork/008-update-objectscript-grammar-v1-8-0
+    RUN_TEST(objectscript_udl_calls_typed_new);
+    RUN_TEST(objectscript_udl_calls_typed_param);
+    RUN_TEST(objectscript_udl_calls_typed_property);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);

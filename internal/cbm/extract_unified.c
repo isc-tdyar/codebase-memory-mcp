@@ -57,6 +57,149 @@ static void recompute_state(WalkState *state, const char *module_qn) {
     }
 }
 
+static void os_type_map_add(os_type_map_t *map, const char *var_name, const char *class_name) {
+    if (map->count >= OS_TYPE_MAP_CAP || !var_name || !class_name) {
+        return;
+    }
+    for (int i = 0; i < map->count; i++) {
+        if (strcmp(map->entries[i].var_name, var_name) == 0) {
+            map->entries[i].class_name = class_name;
+            return;
+        }
+    }
+    map->entries[map->count].var_name = var_name;
+    map->entries[map->count].class_name = class_name;
+    map->count++;
+}
+
+static void handle_objectscript_type_map(CBMExtractCtx *ctx, TSNode node, WalkState *state) {
+    if (ctx->language != CBM_LANG_OBJECTSCRIPT_UDL &&
+        ctx->language != CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+        return;
+    }
+
+    const char *nk = ts_node_type(node);
+
+    if (strcmp(nk, "command_set") == 0) {
+        for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
+            TSNode set_arg = ts_node_named_child(node, i);
+            const char *sak = ts_node_type(set_arg);
+            if (strcmp(sak, "set_argument") != 0 && strcmp(sak, "assignment") != 0) {
+                continue;
+            }
+            TSNode lhs = {0};
+            TSNode rhs = {0};
+            for (uint32_t j = 0; j < ts_node_named_child_count(set_arg); j++) {
+                TSNode achild = ts_node_named_child(set_arg, j);
+                const char *ak = ts_node_type(achild);
+                if (strcmp(ak, "set_target") == 0 || strcmp(ak, "lvn") == 0 ||
+                    strcmp(ak, "variable") == 0 || strcmp(ak, "glvn") == 0) {
+                    lhs = achild;
+                } else if (strcmp(ak, "expression") == 0 || strcmp(ak, "expr_atom") == 0 ||
+                           strcmp(ak, "class_method_call") == 0) {
+                    rhs = achild;
+                }
+            }
+            if (ts_node_is_null(lhs) || ts_node_is_null(rhs)) {
+                continue;
+            }
+
+            TSNode cm_call = rhs;
+            if (strcmp(ts_node_type(cm_call), "class_method_call") != 0) {
+                cm_call = cbm_find_child_by_kind(rhs, "class_method_call");
+                if (ts_node_is_null(cm_call)) {
+                    TSNode inner_expr = cbm_find_child_by_kind(rhs, "expression");
+                    if (!ts_node_is_null(inner_expr)) {
+                        cm_call = cbm_find_child_by_kind(inner_expr, "class_method_call");
+                        if (ts_node_is_null(cm_call)) {
+                            TSNode inner_atom = cbm_find_child_by_kind(inner_expr, "expr_atom");
+                            if (!ts_node_is_null(inner_atom)) {
+                                cm_call = cbm_find_child_by_kind(inner_atom, "class_method_call");
+                            }
+                        }
+                    }
+                }
+                if (ts_node_is_null(cm_call)) {
+                    TSNode atom = cbm_find_child_by_kind(rhs, "expr_atom");
+                    if (!ts_node_is_null(atom)) {
+                        cm_call = cbm_find_child_by_kind(atom, "class_method_call");
+                    }
+                }
+            }
+            if (ts_node_is_null(cm_call)) {
+                continue;
+            }
+
+            TSNode method_name_node = cbm_find_child_by_kind(cm_call, "method_name");
+            if (ts_node_is_null(method_name_node)) {
+                continue;
+            }
+            TSNode mn_ident = ts_node_named_child_count(method_name_node) > 0
+                ? ts_node_named_child(method_name_node, 0) : (TSNode){0};
+            if (ts_node_is_null(mn_ident)) {
+                continue;
+            }
+            char *method_text = cbm_node_text(ctx->arena, mn_ident, ctx->source);
+            if (!method_text) {
+                continue;
+            }
+            if (strcasecmp(method_text, "%New") != 0 && strcasecmp(method_text, "%OpenId") != 0 &&
+                strcasecmp(method_text, "%Open") != 0) {
+                continue;
+            }
+
+            TSNode class_ref = cbm_find_child_by_kind(cm_call, "class_ref");
+            if (ts_node_is_null(class_ref)) {
+                continue;
+            }
+            TSNode cname = cbm_find_child_by_kind(class_ref, "class_name");
+            if (ts_node_is_null(cname)) {
+                continue;
+            }
+            char *cls = cbm_node_text(ctx->arena, cname, ctx->source);
+            if (!cls || !cls[0]) {
+                continue;
+            }
+
+            TSNode var_node = lhs;
+            TSNode inner = cbm_find_child_by_kind(lhs, "glvn");
+            if (!ts_node_is_null(inner)) {
+                var_node = inner;
+            }
+            inner = cbm_find_child_by_kind(var_node, "lvn");
+            if (!ts_node_is_null(inner)) {
+                var_node = inner;
+            }
+            char *var = cbm_node_text(ctx->arena, var_node, ctx->source);
+            if (!var || !var[0]) {
+                continue;
+            }
+
+            os_type_map_add(&state->os_type_map, var, cls);
+        }
+    }
+
+    if (strcmp(nk, "property") == 0 || strcmp(nk, "relationship") == 0) {
+        TSNode prop_name_node = cbm_find_child_by_kind(node, "property_name");
+        if (ts_node_is_null(prop_name_node)) {
+            prop_name_node = cbm_find_child_by_kind(node, "relationship_name");
+        }
+        TSNode ret_type = cbm_find_child_by_kind(node, "return_type");
+        if (!ts_node_is_null(prop_name_node) && !ts_node_is_null(ret_type)) {
+            TSNode tname = cbm_find_child_by_kind(ret_type, "typename");
+            if (!ts_node_is_null(tname)) {
+                char *pname = cbm_node_text(ctx->arena, prop_name_node, ctx->source);
+                char *ptype = cbm_node_text(ctx->arena, tname, ctx->source);
+                if (pname && pname[0] && ptype && ptype[0]) {
+                    char *dot_name = cbm_arena_sprintf(ctx->arena, "..%s", pname);
+                    os_type_map_add(&state->os_type_map, dot_name, ptype);
+                    state->os_type_map.class_base_count = state->os_type_map.count;
+                }
+            }
+        }
+    }
+}
+
 static const char *objectscript_get_class_name(CBMExtractCtx *ctx, TSNode node) {
     for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
         TSNode child = ts_node_named_child(node, i);
@@ -721,11 +864,55 @@ static void push_boundary_scopes(CBMExtractCtx *ctx, TSNode node, const CBMLangS
         const char *fqn = compute_func_qn(ctx, node, spec, state);
         if (fqn) {
             push_scope(state, SCOPE_FUNC, depth, fqn);
+            if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+                state->os_type_map.count = state->os_type_map.class_base_count;
+                TSNode mdef = cbm_find_child_by_kind(node, "method_definition");
+                if (ts_node_is_null(mdef)) {
+                    mdef = node;
+                }
+                TSNode args_node = cbm_find_child_by_kind(mdef, "arguments");
+                if (!ts_node_is_null(args_node)) {
+                    for (uint32_t ai = 0; ai < ts_node_named_child_count(args_node); ai++) {
+                        TSNode arg = ts_node_named_child(args_node, ai);
+                        if (strcmp(ts_node_type(arg), "argument") != 0) {
+                            continue;
+                        }
+                        TSNode param_name_node = {0};
+                        TSNode type_node = {0};
+                        for (uint32_t pi = 0; pi < ts_node_named_child_count(arg); pi++) {
+                            TSNode pchild = ts_node_named_child(arg, pi);
+                            const char *pk = ts_node_type(pchild);
+                            if (strcmp(pk, "method_arg") == 0) {
+                                param_name_node = pchild;
+                            } else if (strcmp(pk, "return_type") == 0) {
+                                type_node = cbm_find_child_by_kind(pchild, "typename");
+                            }
+                        }
+                        if (!ts_node_is_null(param_name_node) && !ts_node_is_null(type_node)) {
+                            TSNode lvn = cbm_find_child_by_kind(param_name_node, "expr_atom");
+                            if (ts_node_is_null(lvn)) {
+                                lvn = param_name_node;
+                            }
+                            char *pname = cbm_node_text(ctx->arena, lvn, ctx->source);
+                            char *ptype = cbm_node_text(ctx->arena, type_node, ctx->source);
+                            if (pname && pname[0] && ptype && ptype[0]) {
+                                os_type_map_add(&state->os_type_map, pname, ptype);
+                            }
+                        }
+                    }
+                }
+            }
         }
     } else if (spec->class_node_types && cbm_kind_in_set(node, spec->class_node_types)) {
         const char *cqn = compute_class_qn(ctx, node);
         if (cqn) {
             push_scope(state, SCOPE_CLASS, depth, cqn);
+            if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+                state->os_type_map.count = 0;
+                state->os_type_map.class_base_count = 0;
+            }
         }
     } else if (ctx->language == CBM_LANG_RUST && strcmp(ts_node_type(node), "impl_item") == 0) {
         TSNode type_node = ts_node_child_by_field_name(node, TS_FIELD("type"));
@@ -766,6 +953,7 @@ void cbm_extract_unified(CBMExtractCtx *ctx) {
         recompute_state(&state, ctx->module_qn);
 
         handle_string_constants(ctx, node, &state);
+        handle_objectscript_type_map(ctx, node, &state);
         handle_calls(ctx, node, spec, &state);
         handle_usages(ctx, node, spec, &state);
         handle_throws(ctx, node, spec, &state);

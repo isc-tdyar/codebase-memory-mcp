@@ -702,6 +702,76 @@ static void extract_jsx_component_ref(CBMExtractCtx *ctx, TSNode node, const cha
     }
 }
 
+static char *resolve_objectscript_instance_call(CBMArena *a, TSNode node, const char *source,
+                                                os_type_map_t *type_map) {
+    TSNode receiver = {0};
+    TSNode oref = {0};
+    const char *nk_first = NULL;
+
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
+        TSNode child = ts_node_named_child(node, i);
+        const char *ck = ts_node_type(child);
+        if (strcmp(ck, "lvn") == 0 || strcmp(ck, "variable") == 0) {
+            receiver = child;
+        } else if (strcmp(ck, "relative_dot_property") == 0) {
+            receiver = child;
+            nk_first = "relative_dot_property";
+        } else if (strcmp(ck, "oref_method") == 0) {
+            oref = child;
+        }
+    }
+
+    if (ts_node_is_null(oref)) {
+        return NULL;
+    }
+
+    TSNode method_name_node = cbm_find_child_by_kind(oref, "method_name");
+    if (ts_node_is_null(method_name_node)) {
+        return NULL;
+    }
+    TSNode mn_ident = ts_node_named_child_count(method_name_node) > 0
+        ? ts_node_named_child(method_name_node, 0) : (TSNode){0};
+    if (ts_node_is_null(mn_ident)) {
+        return NULL;
+    }
+    char *method = cbm_node_text(a, mn_ident, source);
+    if (!method || !method[0]) {
+        return NULL;
+    }
+
+    if (ts_node_is_null(receiver)) {
+        return NULL;
+    }
+
+    char *var_text = NULL;
+    if (nk_first && strcmp(nk_first, "relative_dot_property") == 0) {
+        TSNode prop_name = cbm_find_child_by_kind(receiver, "member_name");
+        if (!ts_node_is_null(prop_name)) {
+            char *pname = cbm_node_text(a, prop_name, source);
+            if (pname && pname[0]) {
+                var_text = cbm_arena_sprintf(a, "..%s", pname);
+            }
+        }
+        if (!var_text) {
+            var_text = cbm_node_text(a, receiver, source);
+        }
+    } else {
+        var_text = cbm_node_text(a, receiver, source);
+    }
+
+    if (!var_text || !var_text[0]) {
+        return NULL;
+    }
+
+    for (int i = 0; i < type_map->count; i++) {
+        if (strcasecmp(type_map->entries[i].var_name, var_text) == 0) {
+            return cbm_arena_sprintf(a, "%s.%s", type_map->entries[i].class_name, method);
+        }
+    }
+
+    return NULL;
+}
+
 void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, WalkState *state) {
     if (!spec->call_node_types || !spec->call_node_types[0]) {
         return;
@@ -709,6 +779,15 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
 
     if (cbm_kind_in_set(node, spec->call_node_types)) {
         char *callee = extract_callee_name(ctx->arena, node, ctx->source, ctx->language);
+
+        if (!callee &&
+            (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+             ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
+            strcmp(ts_node_type(node), "instance_method_call") == 0) {
+            callee = resolve_objectscript_instance_call(ctx->arena, node, ctx->source,
+                                                       &state->os_type_map);
+        }
+
         if (callee && callee[0] && !cbm_is_keyword(callee, ctx->language)) {
             CBMCall call = {0};
             call.callee_name = callee;
