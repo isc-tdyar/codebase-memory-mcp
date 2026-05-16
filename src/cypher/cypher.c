@@ -1793,7 +1793,9 @@ static const char *node_prop(const cbm_node_t *n, const char *prop, cbm_store_t 
         return str;
     }
     /* Integer properties returned as strings. */
-    static _Thread_local char int_buf[CBM_SZ_32];
+    static _Thread_local char int_bufs[CYP_BUF_8][CBM_SZ_32];
+    static _Thread_local int  int_buf_idx = 0;
+    char *int_buf = int_bufs[int_buf_idx++ & CYP_EBUF_MASK];
     if (strcmp(prop, "start_line") == 0) {
         snprintf(int_buf, sizeof(int_buf), "%d", n->start_line);
         return int_buf;
