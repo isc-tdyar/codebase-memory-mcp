@@ -24,6 +24,7 @@ enum { PC_RING = 4, PC_RING_MASK = 3, PC_SIG_SCAN = 15, PC_REGEX_GRP = 2 };
 #include "service_patterns.h"
 
 #include "foundation/compat_regex.h"
+#include "iris_export_xml.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -415,6 +416,38 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
         }
 
         const char *rel = files[i].rel_path;
+
+        if (files[i].language == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            int slen = 0;
+            char *src = read_file(files[i].path, &slen);
+            if (!src) { errors++; continue; }
+            CBMArena ea; cbm_arena_init(&ea);
+            int cc = 0;
+            char **udls = cbm_iris_export_to_udl(&ea, src, slen, &cc);
+            free(src);
+            for (int ci = 0; ci < cc; ci++) {
+                    CBMFileResult *xr = cbm_extract_file(udls[ci], (int)strlen(udls[ci]),
+                        CBM_LANG_OBJECTSCRIPT_UDL, ctx->project_name, rel,
+                        CBM_EXTRACT_BUDGET, NULL, NULL, NULL, ctx->return_type_table);
+                if (!xr) continue;
+                char *module_qn = cbm_pipeline_fqn_module(ctx->project_name, rel);
+                for (int c = 0; c < xr->calls.count; c++) {
+                    CBMCall *call = &xr->calls.items[c];
+                    if (!call->callee_name) continue;
+                    total_calls++;
+                    if (resolve_single_call(ctx, call, &xr->resolved_calls, rel,
+                                            module_qn, NULL, NULL, 0))
+                        resolved++;
+                    else
+                        unresolved++;
+                }
+                free(module_qn);
+                cbm_free_result(xr);
+            }
+            cbm_arena_destroy(&ea);
+            continue;
+        }
+
         bool result_owned = false;
         CBMFileResult *result = calls_get_or_extract(ctx, i, &files[i], &result_owned);
         if (!result) {

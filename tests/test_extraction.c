@@ -7,6 +7,7 @@
  */
 #include "test_framework.h"
 #include "cbm.h"
+#include "iris_export_xml.h"
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -1788,6 +1789,168 @@ TEST(objectscript_data_flows_instance_method_args) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ * Group H4: IRIS Export XML → UDL transcoder
+ * ═══════════════════════════════════════════════════════════════════ */
+
+#define SIMPLE_EXPORT \
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Simple\">\n" \
+    "<Super>%RegisteredObject</Super>\n" \
+    "<Method name=\"Hello\">\n" \
+    "<ReturnType>%String</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tQuit \"hello\"\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+TEST(iris_export_xml_simple_class) {
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    int count = 0;
+    char **udl = cbm_iris_export_to_udl(&arena, SIMPLE_EXPORT,
+                                         (int)strlen(SIMPLE_EXPORT), &count);
+    ASSERT_NOT_NULL(udl);
+    ASSERT(count == 1);
+    ASSERT_NOT_NULL(udl[0]);
+    ASSERT(strstr(udl[0], "Test.Simple") != NULL);
+    ASSERT(strstr(udl[0], "%RegisteredObject") != NULL);
+    ASSERT(strstr(udl[0], "Hello") != NULL);
+    ASSERT(strstr(udl[0], "Quit \"hello\"") != NULL);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+#define CLASSMETHOD_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.CM\">\n" \
+    "<Method name=\"Run\">\n" \
+    "<ClassMethod>1</ClassMethod>\n" \
+    "<FormalSpec>pArg:%String,pFlag:%Boolean=0</FormalSpec>\n" \
+    "<ReturnType>%Status</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tQuit $$$OK\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+TEST(iris_export_xml_classmethod) {
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    int count = 0;
+    char **udl = cbm_iris_export_to_udl(&arena, CLASSMETHOD_EXPORT,
+                                         (int)strlen(CLASSMETHOD_EXPORT), &count);
+    ASSERT_NOT_NULL(udl);
+    ASSERT(count == 1);
+    ASSERT(strstr(udl[0], "ClassMethod") != NULL);
+    ASSERT(strstr(udl[0], "pArg") != NULL);
+    ASSERT(strstr(udl[0], "pFlag") != NULL);
+    ASSERT(strstr(udl[0], "%Status") != NULL);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+#define MEMBER_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Members\">\n" \
+    "<Property name=\"Name\">\n" \
+    "<Type>%String</Type>\n" \
+    "<Parameter name=\"MAXLEN\" value=\"200\"/>\n" \
+    "</Property>\n" \
+    "<Parameter name=\"VERSION\">\n" \
+    "<Default>1</Default>\n" \
+    "</Parameter>\n" \
+    "<Index name=\"NameIdx\">\n" \
+    "<Properties>Name</Properties>\n" \
+    "<Unique>1</Unique>\n" \
+    "</Index>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+TEST(iris_export_xml_property_parameter_index) {
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    int count = 0;
+    char **udl = cbm_iris_export_to_udl(&arena, MEMBER_EXPORT,
+                                         (int)strlen(MEMBER_EXPORT), &count);
+    ASSERT_NOT_NULL(udl);
+    ASSERT(count == 1);
+    ASSERT(strstr(udl[0], "Property Name") != NULL);
+    ASSERT(strstr(udl[0], "%String") != NULL);
+    ASSERT(strstr(udl[0], "Parameter VERSION") != NULL);
+    ASSERT(strstr(udl[0], "Index NameIdx") != NULL);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+#define CALLS_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Caller\">\n" \
+    "<Super>%RegisteredObject</Super>\n" \
+    "<Method name=\"Run\">\n" \
+    "<ClassMethod>1</ClassMethod>\n" \
+    "<ReturnType>%Status</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tSet obj = ##class(Target.Worker).%New()\n" \
+    "\tDo obj.Execute()\n" \
+    "\tQuit $$$OK\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+TEST(iris_export_xml_calls_extracted) {
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    int count = 0;
+    char **udl = cbm_iris_export_to_udl(&arena, CALLS_EXPORT,
+                                         (int)strlen(CALLS_EXPORT), &count);
+    ASSERT_NOT_NULL(udl);
+    ASSERT(count == 1);
+    CBMFileResult *r = cbm_extract_file(udl[0], (int)strlen(udl[0]),
+                                        CBM_LANG_OBJECTSCRIPT_UDL,
+                                        "t", "Caller.cls", 0,
+                                        NULL, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "Target.Worker.Execute"));
+    cbm_free_result(r);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+#define MULTI_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.First\">\n" \
+    "<Method name=\"One\"><Implementation><![CDATA[\tQuit 1\n]]></Implementation></Method>\n" \
+    "</Class>\n" \
+    "<Class name=\"Test.Second\">\n" \
+    "<Method name=\"Two\"><Implementation><![CDATA[\tQuit 2\n]]></Implementation></Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+TEST(iris_export_xml_multi_class) {
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    int count = 0;
+    char **udl = cbm_iris_export_to_udl(&arena, MULTI_EXPORT,
+                                         (int)strlen(MULTI_EXPORT), &count);
+    ASSERT_NOT_NULL(udl);
+    ASSERT(count == 2);
+    ASSERT(strstr(udl[0], "Test.First") != NULL || strstr(udl[1], "Test.First") != NULL);
+    ASSERT(strstr(udl[0], "Test.Second") != NULL || strstr(udl[1], "Test.Second") != NULL);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  * Group I: cbm_test.go ports
  * ═══════════════════════════════════════════════════════════════════ */
 
@@ -2714,6 +2877,11 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_calls_typed_property);
     RUN_TEST(objectscript_data_flows_class_method_args);
     RUN_TEST(objectscript_data_flows_instance_method_args);
+    RUN_TEST(iris_export_xml_simple_class);
+    RUN_TEST(iris_export_xml_classmethod);
+    RUN_TEST(iris_export_xml_property_parameter_index);
+    RUN_TEST(iris_export_xml_calls_extracted);
+    RUN_TEST(iris_export_xml_multi_class);
 
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);

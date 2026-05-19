@@ -11,6 +11,7 @@
  * Depends on: extraction layer (cbm.h), graph_buffer, pipeline internals
  */
 #include "foundation/constants.h"
+#include "iris_export_xml.h"
 
 enum { PD_RING = 4, PD_RING_MASK = 3, PD_JSON_MARGIN = 10, PD_ESC_MARGIN = 3, PD_ESC_SPACE = 2 };
 #include "pipeline/pipeline.h"
@@ -351,6 +352,32 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
         }
 
         /* Extract */
+        if (lang == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            CBMArena export_arena;
+            cbm_arena_init(&export_arena);
+            int class_count = 0;
+            char **udl_strings = cbm_iris_export_to_udl(&export_arena, source,
+                                                         source_len, &class_count);
+            free(source);
+            for (int ci = 0; ci < class_count; ci++) {
+                CBMFileResult *xr = cbm_extract_file(udl_strings[ci],
+                    (int)strlen(udl_strings[ci]), CBM_LANG_OBJECTSCRIPT_UDL,
+                    ctx->project_name, rel, CBM_EXTRACT_BUDGET,
+                    NULL, NULL, NULL, NULL);
+                if (!xr) continue;
+                for (int d = 0; d < xr->defs.count; d++) {
+                    process_def(ctx, &xr->defs.items[d], rel);
+                    total_defs++;
+                }
+                total_calls  += xr->calls.count;
+                total_imports += create_import_edges_for_file(ctx, xr, rel);
+                create_channel_edges_for_file(ctx, xr, rel);
+                cbm_free_result(xr);
+            }
+            cbm_arena_destroy(&export_arena);
+            continue;
+        }
+
         CBMFileResult *result =
             cbm_extract_file(source, source_len, lang, ctx->project_name, rel, CBM_EXTRACT_BUDGET,
                              NULL, NULL, NULL, NULL

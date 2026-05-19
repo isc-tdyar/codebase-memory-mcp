@@ -116,6 +116,7 @@ EXTRACTION_SRCS = \
     $(CBM_DIR)/extract_defs.c \
     $(CBM_DIR)/extract_calls.c \
     $(CBM_DIR)/macro_table.c \
+    $(CBM_DIR)/iris_export_xml.c \
     $(CBM_DIR)/extract_imports.c \
     $(CBM_DIR)/extract_usages.c \
     $(CBM_DIR)/extract_unified.c \

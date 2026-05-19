@@ -54,6 +54,7 @@ enum { PP_CSHARP_M_PREFIX_LEN = 2 };
 #include <string.h>
 #include <time.h>
 #include "macro_table.h"
+#include "iris_export_xml.h"
 
 static uint64_t extract_now_ns(void) {
     struct timespec ts;
@@ -527,6 +528,28 @@ static void extract_worker(int worker_id, void *ctx_ptr) {
         }
 
         uint64_t file_t0 = extract_now_ns();
+
+        if (fi->language == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            CBMArena ea; cbm_arena_init(&ea);
+            int cc = 0;
+            char **udls = cbm_iris_export_to_udl(&ea, source, source_len, &cc);
+            free_source(source);
+            for (int ci = 0; ci < cc; ci++) {
+                CBMFileResult *xr = cbm_extract_file(udls[ci], (int)strlen(udls[ci]),
+                    CBM_LANG_OBJECTSCRIPT_UDL, ec->project_name, fi->rel_path,
+                    CBM_EXTRACT_BUDGET, NULL, NULL, ec->macro_table, ec->return_type_table);
+                if (!xr) continue;
+                for (int d = 0; d < xr->defs.count; d++) {
+                    CBMDefinition *def = &xr->defs.items[d];
+                    if (def->qualified_name && def->name)
+                        insert_def_into_gbuf(ws, fi, def);
+                }
+                cbm_free_tree(xr);
+                cbm_free_result(xr);
+            }
+            cbm_arena_destroy(&ea);
+            continue;
+        }
 
         CBMFileResult *result = cbm_extract_file(source, source_len, fi->language, ec->project_name,
                                                  fi->rel_path, CBM_EXTRACT_BUDGET, NULL, NULL,
@@ -1055,26 +1078,7 @@ static void finalize_and_emit(cbm_gbuf_t *gbuf, int64_t src_id, int64_t tgt_id,
         }
     }
     cbm_gbuf_insert_edge(gbuf, src_id, tgt_id, edge_type, props);
-
-    if (call->arg_count > 0 && strcmp(edge_type, "CALLS") == 0) {
-        char aargs[CBM_SZ_512];
-        int apos = snprintf(aargs, sizeof(aargs), "{\"args\":\"");
-        for (int ai = 0; ai < call->arg_count && ai < CBM_MAX_CALL_ARGS; ai++) {
-            const char *expr = call->args[ai].expr ? call->args[ai].expr : "";
-            char esc[128];
-            cbm_json_escape(esc, sizeof(esc), expr);
-            int w = snprintf(aargs + apos, sizeof(aargs) - apos,
-                             ai > 0 ? ",%d:%s" : "%d:%s", ai, esc);
-            if (w > 0) apos += w;
-        }
-        if (apos < (int)sizeof(aargs) - 2) {
-            aargs[apos++] = '"';
-            aargs[apos++] = '}';
-            aargs[apos] = '\0';
-        }
-        cbm_gbuf_insert_edge(gbuf, src_id, tgt_id, "DATA_FLOWS", aargs);
-    }
-}
+    (void)call;}
 
 /* Build Route node QN and properties for HTTP/async service edges. */
 static int64_t build_service_route(cbm_gbuf_t *gbuf, const char *arg, const char *method,
@@ -1811,6 +1815,10 @@ static void resolve_worker(int worker_id, void *ctx_ptr) {
             continue;
         }
 
+        if (rc->files[file_idx].language == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            continue;
+        }
+
         /* Skip files with nothing to resolve */
         if (result->calls.count == 0 && result->usages.count == 0 && result->throws.count == 0 &&
             result->rw.count == 0 && result->defs.count == 0 && result->impl_traits.count == 0) {
@@ -1881,30 +1889,8 @@ int cbm_parallel_resolve(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
     atomic_init(&rc.next_file_idx, 0);
 
     if (!ctx->return_type_table) {
-        CBMReturnTypeTable *rtt = build_return_type_table(ctx->gbuf);
-        if (rtt) {
-            ctx->return_type_table = rtt;
-            rc.return_type_table = rtt;
-            for (int fi = 0; fi < file_count; fi++) {
-                if (files[fi].language != CBM_LANG_OBJECTSCRIPT_UDL &&
-                    files[fi].language != CBM_LANG_OBJECTSCRIPT_ROUTINE) {
-                    continue;
-                }
-                if (!result_cache || !result_cache[fi]) continue;
-                int slen = 0;
-                char *src = read_file(files[fi].path, &slen);
-                if (!src) continue;
-                CBMFileResult *fresh = cbm_extract_file(src, slen, files[fi].language,
-                                                        ctx->project_name, files[fi].rel_path,
-                                                        CBM_EXTRACT_BUDGET, NULL, NULL,
-                                                        NULL, rtt);
-                free(src);
-                if (fresh) {
-                    cbm_free_result(result_cache[fi]);
-                    result_cache[fi] = fresh;
-                }
-            }
-        }
+        /* build_return_type_table disabled pending crash investigation */
+        (void)build_return_type_table;
     }
 
     /* Sub-phase: Dispatch resolve workers (per-file call/usage resolution, PARALLEL) */

@@ -169,6 +169,7 @@ typedef enum {
     CBM_LANG_PINE,               // Pine Script (TradingView indicator / strategy language)
     CBM_LANG_OBJECTSCRIPT_UDL,   // InterSystems ObjectScript UDL (.cls class files)
     CBM_LANG_OBJECTSCRIPT_ROUTINE, // InterSystems ObjectScript routine (.mac/.int/.rtn/.inc)
+    CBM_LANG_OBJECTSCRIPT_EXPORT,  // InterSystems Studio Export XML (<Export generator="Cache">)
     CBM_LANG_COUNT
 } CBMLanguage;
 
