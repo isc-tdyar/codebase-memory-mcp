@@ -3,6 +3,7 @@
 
 #include "type_rep.h"
 #include "../arena.h"
+#include <stdbool.h>
 
 // Decorator-derived flags (Python). Added at struct tail so existing
 // callers that memset to zero before populating other fields keep working.

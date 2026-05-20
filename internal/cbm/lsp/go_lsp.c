@@ -2678,7 +2678,10 @@ void cbm_run_go_lsp_cross(
     // 3b. Phase 1c: Extract type params from generic function declarations
     extract_type_params_from_ast(arena, &reg, root, source, module_qn);
 
-    // 4. Build LSP context and run
+    // 4. Finalize for O(1) lookups (see CROSS_FILE_ARCHITECTURE.md §4).
+    cbm_registry_finalize(&reg);
+
+    // 5. Build LSP context and run
     GoLSPContext ctx;
     go_lsp_init(&ctx, arena, source, source_len, &reg, module_qn, out);
 

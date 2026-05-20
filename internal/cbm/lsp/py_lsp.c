@@ -3115,6 +3115,9 @@ void cbm_run_py_lsp_cross(
     cbm_python_stdlib_register(&reg, arena);
     py_register_lsp_defs(arena, &reg, defs, def_count);
 
+    // Finalize for O(1) lookups (see CROSS_FILE_ARCHITECTURE.md §4).
+    cbm_registry_finalize(&reg);
+
     PyLSPContext ctx;
     py_lsp_init(&ctx, arena, source, source_len, &reg, module_qn, out);
     for (int i = 0; i < import_count; i++) {

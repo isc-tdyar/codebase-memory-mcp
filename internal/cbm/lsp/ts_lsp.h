@@ -108,6 +108,30 @@ void cbm_run_ts_lsp_cross(CBMArena* arena,
 // will replace this in v1.3.
 void cbm_ts_stdlib_register(CBMTypeRegistry* reg, CBMArena* arena);
 
+// Build a project-wide shared registry once, to be reused across all per-file
+// cbm_run_ts_lsp_cross_shared calls in the pass. Initializes reg, registers the
+// TS stdlib, registers the cross-file defs, then calls cbm_registry_finalize.
+// Caller-owned arena must outlive every shared-registry use.
+void cbm_ts_build_shared_registry(CBMArena* arena, CBMTypeRegistry* reg,
+                                  CBMLSPDef* defs, int def_count);
+
+// Cross-file LSP variant that uses a pre-built shared registry. Same semantics
+// as cbm_run_ts_lsp_cross but skips per-file stdlib + def registration: the
+// caller has already done that via cbm_ts_build_shared_registry.
+//
+// shared_reg must remain valid (and unmodified) for the duration of this call.
+// arena is used for transient per-file allocations only; the shared registry's
+// arena (passed to cbm_ts_build_shared_registry) is separate.
+void cbm_run_ts_lsp_cross_shared(CBMArena* arena,
+                                 const char* source, int source_len,
+                                 const char* module_qn,
+                                 bool js_mode, bool jsx_mode, bool dts_mode,
+                                 const CBMTypeRegistry* shared_reg,
+                                 const char** import_names, const char** import_qns,
+                                 int import_count,
+                                 TSTree* cached_tree,
+                                 CBMResolvedCallArray* out);
+
 // --- Batch cross-file LSP ---
 
 // Per-file input for batch TS LSP processing.

@@ -298,11 +298,18 @@ static void c_resolve_pending_template_calls(CLSPContext* ctx,
     int tpn_count = 0;
     while (tpn[tpn_count] && tpn_count < 8) tpn_count++;
 
-    // Match call arg types against function param types to deduce type params
+    // Match call arg types against function param types to deduce type params.
+    // Count param_types once so we don't read past the NULL-terminated array
+    // when the call passes more arguments than the declared signature has
+    // params (e.g. C variadics, mismatched call sites). Same bug shape as
+    // the OOB fix in ts_lsp.c's process_node call_expression branch.
     if (callee->signature && callee->signature->kind == CBM_TYPE_FUNC &&
         callee->signature->data.func.param_types) {
+        int param_count = 0;
+        while (callee->signature->data.func.param_types[param_count]) param_count++;
         for (int i = 0; i < call_arg_count; i++) {
-            const CBMType* formal = callee->signature->data.func.param_types[i];
+            const CBMType* formal = (i < param_count)
+                ? callee->signature->data.func.param_types[i] : NULL;
             if (!formal || !call_arg_types[i]) continue;
             // Unwrap references/pointers
             while (formal && (formal->kind == CBM_TYPE_REFERENCE ||
@@ -4702,6 +4709,12 @@ void cbm_run_c_lsp_cross(
     }
 
     TSNode root = ts_tree_root_node(tree);
+
+    // Finalize the registry so lookups go through the hash buckets (O(1))
+    // instead of linear scans (O(N)). Per CROSS_FILE_ARCHITECTURE.md §4: the
+    // registry is fully populated at this point (stdlib + cross-file defs);
+    // c_lsp_process_file only does lookups after this.
+    cbm_registry_finalize(&reg);
 
     // Initialize context and run
     CLSPContext ctx;

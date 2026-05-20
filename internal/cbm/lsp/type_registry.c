@@ -45,11 +45,14 @@ static void build_qn_index(CBMTypeRegistry* reg, bool for_funcs) {
     if (bucket_count < 16) bucket_count = 16;
 
     int* buckets = (int*)cbm_arena_alloc(reg->arena, (size_t)bucket_count * sizeof(int));
+    int* tails = (int*)cbm_arena_alloc(reg->arena, (size_t)bucket_count * sizeof(int));
     CBMRegistryHashEntry* entries = (CBMRegistryHashEntry*)cbm_arena_alloc(
         reg->arena, (size_t)count * sizeof(CBMRegistryHashEntry));
-    if (!buckets || !entries) return;
-    for (int i = 0; i < bucket_count; i++) buckets[i] = -1;
+    if (!buckets || !tails || !entries) return;
+    for (int i = 0; i < bucket_count; i++) { buckets[i] = -1; tails[i] = -1; }
 
+    // Tail-insert so chains run in array order (lowest index first). Preserves
+    // the "first match wins" tie-breaking semantics of the linear-scan fallback.
     for (int i = 0; i < count; i++) {
         const char* qn = for_funcs ? reg->funcs[i].qualified_name
                                    : reg->types[i].qualified_name;
@@ -58,9 +61,14 @@ static void build_qn_index(CBMTypeRegistry* reg, bool for_funcs) {
         int slot = (int)(h & (uint64_t)(bucket_count - 1));
         entries[i].hash = h;
         entries[i].payload_index = i;
-        entries[i].next_index = buckets[slot];
+        entries[i].next_index = -1;
         entries[i].slot = slot;
-        buckets[slot] = i;
+        if (buckets[slot] == -1) {
+            buckets[slot] = i;
+        } else {
+            entries[tails[slot]].next_index = i;
+        }
+        tails[slot] = i;
     }
     if (for_funcs) {
         reg->func_qn_buckets = buckets;
@@ -80,11 +88,14 @@ static void build_method_index(CBMTypeRegistry* reg) {
     int bucket_count = next_pow2(reg->func_count * 2);
     if (bucket_count < 16) bucket_count = 16;
     int* buckets = (int*)cbm_arena_alloc(reg->arena, (size_t)bucket_count * sizeof(int));
+    int* tails = (int*)cbm_arena_alloc(reg->arena, (size_t)bucket_count * sizeof(int));
     CBMRegistryHashEntry* entries = (CBMRegistryHashEntry*)cbm_arena_alloc(
         reg->arena, (size_t)reg->func_count * sizeof(CBMRegistryHashEntry));
-    if (!buckets || !entries) return;
-    for (int i = 0; i < bucket_count; i++) buckets[i] = -1;
+    if (!buckets || !tails || !entries) return;
+    for (int i = 0; i < bucket_count; i++) { buckets[i] = -1; tails[i] = -1; }
 
+    // Tail-insert: chains run in array order (lowest index first), matching
+    // the linear-scan tie-breaking behavior in the fallback path.
     int idx = 0;
     for (int i = 0; i < reg->func_count; i++) {
         const CBMRegisteredFunc* f = &reg->funcs[i];
@@ -93,9 +104,14 @@ static void build_method_index(CBMTypeRegistry* reg) {
         int slot = (int)(h & (uint64_t)(bucket_count - 1));
         entries[idx].hash = h;
         entries[idx].payload_index = i;
-        entries[idx].next_index = buckets[slot];
+        entries[idx].next_index = -1;
         entries[idx].slot = slot;
-        buckets[slot] = idx;
+        if (buckets[slot] == -1) {
+            buckets[slot] = idx;
+        } else {
+            entries[tails[slot]].next_index = idx;
+        }
+        tails[slot] = idx;
         idx++;
     }
     reg->method_buckets = buckets;

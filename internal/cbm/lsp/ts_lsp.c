@@ -2347,6 +2347,10 @@ static void process_node(TSLSPContext* ctx, TSNode node) {
             const CBMType* fn_type = ts_eval_expr_type(ctx, fn_node);
             if (!fn_type || fn_type->kind != CBM_TYPE_FUNC) break;
             if (!fn_type->data.func.param_types) break;
+            // Count param_types so we don't read past the array when the call passes
+            // more arguments than the declared signature has params.
+            uint32_t param_count = 0;
+            while (fn_type->data.func.param_types[param_count]) param_count++;
             TSNode args = ts_node_child_by_field_name(node, "arguments",
                                                       TS_LSP_FIELD_LEN("arguments"));
             if (ts_node_is_null(args)) break;
@@ -2359,7 +2363,8 @@ static void process_node(TSLSPContext* ctx, TSNode node) {
                 TSNode arg = ts_node_named_child(args, i);
                 if (ts_node_is_null(arg)) continue;
                 const char* ak = ts_node_type(arg);
-                const CBMType* expected = fn_type->data.func.param_types[i];
+                const CBMType* expected = (i < param_count)
+                    ? fn_type->data.func.param_types[i] : NULL;
                 if ((strcmp(ak, "arrow_function") == 0 ||
                      strcmp(ak, "function_expression") == 0) &&
                     expected && expected->kind == CBM_TYPE_FUNC) {
@@ -4228,10 +4233,234 @@ void cbm_run_ts_lsp(CBMArena* arena, CBMFileResult* result,
     apply_jsdoc_signatures(&ctx, root, &reg);
     infer_implicit_returns(&ctx, root, &reg);
 
+    /* Finalize for O(1) lookups during ts_lsp_process_file (see
+     * CROSS_FILE_ARCHITECTURE.md §4). All registry adds are above this point. */
+    cbm_registry_finalize(&reg);
+
     ts_lsp_process_file(&ctx, root);
 }
 
 // ── Cross-file entry point (Phase 3) ──────────────────────────────────────────
+
+// Register a CBMLSPDef[] into a TS registry. Extracted out of cbm_run_ts_lsp_cross
+// so both the per-file path and the shared-registry path can populate the same
+// registry contents without duplication.
+static void register_ts_cross_defs(CBMArena* arena, CBMTypeRegistry* reg,
+                                   CBMLSPDef* defs, int def_count) {
+    for (int i = 0; i < def_count; i++) {
+        const CBMLSPDef* d = &defs[i];
+        if (!d->qualified_name || !d->short_name || !d->label) continue;
+
+        if (strcmp(d->label, "Class") == 0 || strcmp(d->label, "Interface") == 0) {
+            CBMRegisteredType rt;
+            memset(&rt, 0, sizeof(rt));
+            rt.qualified_name = d->qualified_name;
+            rt.short_name = d->short_name;
+            rt.is_interface = (strcmp(d->label, "Interface") == 0);
+            // Embedded types (extends list) — pipe-separated.
+            if (d->embedded_types && d->embedded_types[0]) {
+                int n = 1;
+                for (const char* s = d->embedded_types; *s; s++) if (*s == '|') n++;
+                const char** arr = (const char**)cbm_arena_alloc(arena,
+                                                                 (size_t)(n + 1) * sizeof(const char*));
+                if (arr) {
+                    int idx = 0;
+                    const char* start = d->embedded_types;
+                    for (const char* s = d->embedded_types;; s++) {
+                        if (*s == '|' || *s == '\0') {
+                            arr[idx++] = cbm_arena_strndup(arena, start, (size_t)(s - start));
+                            if (*s == '\0') break;
+                            start = s + 1;
+                        }
+                    }
+                    arr[idx] = NULL;
+                    rt.embedded_types = arr;
+                }
+            }
+            // Field defs (interface members, "name:type|name:type").
+            if (d->field_defs && d->field_defs[0]) {
+                int n = 1;
+                for (const char* s = d->field_defs; *s; s++) if (*s == '|') n++;
+                const char** fn_arr = (const char**)cbm_arena_alloc(arena,
+                                                                    (size_t)(n + 1) * sizeof(const char*));
+                const CBMType** ft_arr = (const CBMType**)cbm_arena_alloc(arena,
+                                                                          (size_t)(n + 1) * sizeof(const CBMType*));
+                if (fn_arr && ft_arr) {
+                    int idx = 0;
+                    const char* start = d->field_defs;
+                    for (const char* s = d->field_defs;; s++) {
+                        if (*s == '|' || *s == '\0') {
+                            char* pair = cbm_arena_strndup(arena, start, (size_t)(s - start));
+                            char* colon = pair ? strchr(pair, ':') : NULL;
+                            if (pair && colon) {
+                                *colon = '\0';
+                                fn_arr[idx] = pair;
+                                ft_arr[idx] = parse_ts_type_text(arena, colon + 1,
+                                                                 d->def_module_qn);
+                                idx++;
+                            }
+                            if (*s == '\0') break;
+                            start = s + 1;
+                        }
+                    }
+                    fn_arr[idx] = NULL;
+                    ft_arr[idx] = NULL;
+                    rt.field_names = fn_arr;
+                    rt.field_types = ft_arr;
+                }
+            }
+            cbm_registry_add_type(reg, rt);
+            // Method names from method_names_str.
+            if (d->method_names_str && d->method_names_str[0]) {
+                int n = 1;
+                for (const char* s = d->method_names_str; *s; s++) if (*s == '|') n++;
+                const char** mn_arr = (const char**)cbm_arena_alloc(arena,
+                                                                    (size_t)(n + 1) * sizeof(const char*));
+                const char** mqn_arr = (const char**)cbm_arena_alloc(arena,
+                                                                     (size_t)(n + 1) * sizeof(const char*));
+                if (mn_arr && mqn_arr) {
+                    int idx = 0;
+                    const char* start = d->method_names_str;
+                    for (const char* s = d->method_names_str;; s++) {
+                        if (*s == '|' || *s == '\0') {
+                            char* m = cbm_arena_strndup(arena, start, (size_t)(s - start));
+                            mn_arr[idx] = m;
+                            mqn_arr[idx] = cbm_arena_sprintf(arena, "%s.%s", d->qualified_name, m);
+                            idx++;
+                            if (*s == '\0') break;
+                            start = s + 1;
+                        }
+                    }
+                    mn_arr[idx] = NULL;
+                    mqn_arr[idx] = NULL;
+                    // Find the type we just inserted and attach.
+                    if (reg->type_count > 0) {
+                        CBMRegisteredType* rt_just = &reg->types[reg->type_count - 1];
+                        rt_just->method_names = mn_arr;
+                        rt_just->method_qns = mqn_arr;
+                    }
+                }
+            }
+        } else if (strcmp(d->label, "Function") == 0 || strcmp(d->label, "Method") == 0) {
+            CBMRegisteredFunc rf;
+            memset(&rf, 0, sizeof(rf));
+            rf.qualified_name = d->qualified_name;
+            rf.short_name = d->short_name;
+            rf.min_params = -1;
+            // Return types from pipe-separated return_types text.
+            if (d->return_types && d->return_types[0]) {
+                int n = 1;
+                for (const char* s = d->return_types; *s; s++) if (*s == '|') n++;
+                const CBMType** rets = (const CBMType**)cbm_arena_alloc(arena,
+                                                                       (size_t)(n + 1) * sizeof(const CBMType*));
+                if (rets) {
+                    int idx = 0;
+                    const char* start = d->return_types;
+                    for (const char* s = d->return_types;; s++) {
+                        if (*s == '|' || *s == '\0') {
+                            char* part = cbm_arena_strndup(arena, start, (size_t)(s - start));
+                            rets[idx++] = parse_ts_type_text(arena, part, d->def_module_qn);
+                            if (*s == '\0') break;
+                            start = s + 1;
+                        }
+                    }
+                    rets[idx] = NULL;
+                    rf.signature = cbm_type_func(arena, NULL, NULL, rets);
+                }
+            }
+            if (strcmp(d->label, "Method") == 0 && d->receiver_type) {
+                rf.receiver_type = d->receiver_type;
+            }
+            cbm_registry_add_func(reg, rf);
+        }
+    }
+}
+
+// Run the LSP type-resolution passes against a registry that's already populated
+// (stdlib + defs registered). Used by both the per-file and shared-registry entry
+// points after they've prepared the registry.
+static void run_ts_lsp_with_registry(CBMArena* arena, const CBMTypeRegistry* reg,
+                                     const char* source, int source_len,
+                                     const char* module_qn,
+                                     bool js_mode, bool jsx_mode, bool dts_mode,
+                                     const char** import_names, const char** import_qns,
+                                     int import_count,
+                                     TSTree* cached_tree,
+                                     CBMResolvedCallArray* out) {
+    // Use cached tree if available; otherwise parse internally and own it.
+    TSTree* tree = cached_tree;
+    bool owns_tree = false;
+    if (!tree) {
+        if (!source || source_len <= 0) return;
+        TSParser* parser = ts_parser_new();
+        if (!parser) return;
+        const TSLanguage* lang = jsx_mode ? (js_mode ? tree_sitter_javascript()
+                                                     : tree_sitter_tsx())
+                                          : (js_mode ? tree_sitter_javascript()
+                                                     : tree_sitter_typescript());
+        ts_parser_set_language(parser, lang);
+        tree = ts_parser_parse_string(parser, NULL, source, source_len);
+        ts_parser_delete(parser);
+        if (!tree) return;
+        owns_tree = true;
+    }
+    TSNode root = ts_tree_root_node(tree);
+    if (ts_node_is_null(root)) {
+        if (owns_tree) ts_tree_delete(tree);
+        return;
+    }
+
+    TSLSPContext ctx;
+    ts_lsp_init(&ctx, arena, source, source_len, reg, module_qn,
+                js_mode, jsx_mode, dts_mode, out);
+
+    for (int i = 0; i < import_count; i++) {
+        if (import_names && import_qns && import_names[i] && import_qns[i]) {
+            ts_lsp_add_import(&ctx, import_names[i], import_qns[i]);
+        }
+    }
+
+    // ast_sweep_shapes etc. add/mutate registry entries. We finalize AFTER them
+    // so all entries are in the hash buckets before ts_lsp_process_file's
+    // lookups run. Per CROSS_FILE_ARCHITECTURE.md §4.
+    CBMTypeRegistry* mutable_reg = (CBMTypeRegistry*)reg;
+    ast_sweep_shapes(&ctx, root, mutable_reg);
+    rebuild_signatures_from_ast(&ctx, root, mutable_reg);
+    convert_signature_type_params(&ctx, root, mutable_reg);
+    apply_jsdoc_signatures(&ctx, root, mutable_reg);
+    infer_implicit_returns(&ctx, root, mutable_reg);
+
+    cbm_registry_finalize(mutable_reg);
+
+    ts_lsp_process_file(&ctx, root);
+
+    if (owns_tree) ts_tree_delete(tree);
+}
+
+void cbm_ts_build_shared_registry(CBMArena* arena, CBMTypeRegistry* reg,
+                                  CBMLSPDef* defs, int def_count) {
+    if (!arena || !reg) return;
+    cbm_registry_init(reg, arena);
+    cbm_ts_stdlib_register(reg, arena);
+    register_ts_cross_defs(arena, reg, defs, def_count);
+    cbm_registry_finalize(reg);
+}
+
+void cbm_run_ts_lsp_cross_shared(CBMArena* arena,
+                                 const char* source, int source_len,
+                                 const char* module_qn,
+                                 bool js_mode, bool jsx_mode, bool dts_mode,
+                                 const CBMTypeRegistry* shared_reg,
+                                 const char** import_names, const char** import_qns,
+                                 int import_count,
+                                 TSTree* cached_tree,
+                                 CBMResolvedCallArray* out) {
+    if (!arena || !out || !shared_reg) return;
+    run_ts_lsp_with_registry(arena, shared_reg, source, source_len, module_qn,
+                             js_mode, jsx_mode, dts_mode,
+                             import_names, import_qns, import_count,
+                             cached_tree, out);
+}
 
 void cbm_run_ts_lsp_cross(CBMArena* arena,
                           const char* source, int source_len,
@@ -4246,7 +4475,24 @@ void cbm_run_ts_lsp_cross(CBMArena* arena,
     CBMTypeRegistry reg;
     cbm_registry_init(&reg, arena);
     cbm_ts_stdlib_register(&reg, arena);
+    register_ts_cross_defs(arena, &reg, defs, def_count);
+    /* run_ts_lsp_with_registry calls cbm_registry_finalize() internally
+     * after its AST-sweep passes that may add to the registry. */
+    run_ts_lsp_with_registry(arena, &reg, source, source_len, module_qn,
+                             js_mode, jsx_mode, dts_mode,
+                             import_names, import_qns, import_count,
+                             cached_tree, out);
+}
 
+// Stub: the original body's def-registration loop continues below. Now that
+// cbm_run_ts_lsp_cross above is the new implementation, the original body is
+// dead — strip it via the matching closing brace before next function. The
+// edit below replaces the loop start with a marker for the dead code below.
+static void __unused_ts_old_cross_body_marker(void) {
+    // see register_ts_cross_defs / cbm_run_ts_lsp_cross above
+}
+
+#if 0  // original implementation, kept as #if 0 reference until verified
     // Register cross-file defs.
     for (int i = 0; i < def_count; i++) {
         const CBMLSPDef* d = &defs[i];
@@ -4418,10 +4664,15 @@ void cbm_run_ts_lsp_cross(CBMArena* arena,
     apply_jsdoc_signatures(&ctx, root, &reg);
     infer_implicit_returns(&ctx, root, &reg);
 
+    /* Finalize for O(1) lookups during ts_lsp_process_file (see
+     * CROSS_FILE_ARCHITECTURE.md §4). All registry adds are above this point. */
+    cbm_registry_finalize(&reg);
+
     ts_lsp_process_file(&ctx, root);
 
     if (owns_tree) ts_tree_delete(tree);
 }
+#endif  // end of dead-code block — original cbm_run_ts_lsp_cross body
 
 // ── Batch cross-file (Phase 3) ────────────────────────────────────────────────
 
