@@ -34,6 +34,10 @@ struct cbm_gitignore {
     gi_pattern_t *patterns;
     int count;
     int capacity;
+
+    char **exact_names;
+    int    exact_count;
+    int    exact_cap;
 };
 
 /* ── Pattern matching engine ─────────────────────────────────────── */
@@ -248,6 +252,29 @@ static void gi_add_pattern(cbm_gitignore_t *gi, const char *line, int len) {
     }
 
     gi->patterns[gi->count++] = p;
+
+    /* Fast-path: if this is a plain name (no glob chars, no path sep, not negated,
+     * dir-only or unconstrained), add to the exact_names set for O(1) lookup. */
+    if (!p.negated && !p.rooted) {
+        bool has_glob = false;
+        for (int i = 0; p.pattern[i]; i++) {
+            if (p.pattern[i] == '*' || p.pattern[i] == '?' ||
+                p.pattern[i] == '[' || p.pattern[i] == '/') {
+                has_glob = true;
+                break;
+            }
+        }
+        if (!has_glob) {
+            if (gi->exact_count >= gi->exact_cap) {
+                int nc = gi->exact_cap ? gi->exact_cap * PAIR_LEN : 32;
+                char **na = realloc(gi->exact_names, nc * sizeof(char *));
+                if (na) { gi->exact_names = na; gi->exact_cap = nc; }
+            }
+            if (gi->exact_count < gi->exact_cap) {
+                gi->exact_names[gi->exact_count++] = p.pattern;
+            }
+        }
+    }
 }
 
 /* ── Public API ──────────────────────────────────────────────────── */
@@ -345,9 +372,16 @@ bool cbm_gitignore_matches(const cbm_gitignore_t *gi, const char *rel_path, bool
         return false;
     }
 
-    /* Extract the basename for non-rooted pattern matching */
     const char *basename = strrchr(rel_path, '/');
     basename = basename ? basename + SKIP_ONE : rel_path;
+
+    if (is_dir && gi->exact_count > 0) {
+        for (int i = 0; i < gi->exact_count; i++) {
+            if (strcmp(gi->exact_names[i], basename) == 0) {
+                return true;
+            }
+        }
+    }
 
     bool matched = false;
 
@@ -377,5 +411,6 @@ void cbm_gitignore_free(cbm_gitignore_t *gi) {
         free(gi->patterns[i].pattern);
     }
     free(gi->patterns);
+    free(gi->exact_names);
     free(gi);
 }

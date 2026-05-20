@@ -413,6 +413,24 @@ static void walk_dir_process_entry(cbm_dirent_t *entry, const walk_frame_t *fram
         snprintf(rel_path, sizeof(rel_path), "%s", entry->name);
     }
 
+    /* When d_type is known (POSIX filesystems: ext4, APFS, HFS+), check ignore
+     * patterns and push/skip directories WITHOUT calling stat(). This eliminates
+     * thousands of stat() syscalls on large depot trees where most directories
+     * are pruned by .cbmignore patterns before any file is examined.
+     * d_type == 0 means unknown (Windows, NFS, some FUSE) — fall back to stat(). */
+    if (entry->d_type != 0) {
+        if (entry->is_dir) {
+            if (!should_skip_directory(entry->name, rel_path, opts, gitignore, cbmignore,
+                                       frame->local_gi, frame->local_gi_prefix)) {
+                walk_push_subdir(stack, top, abs_path, rel_path, frame);
+            }
+            return;
+        }
+        if (entry->d_type != DT_REG) {
+            return;
+        }
+    }
+
     struct stat st;
     if (safe_stat(abs_path, &st) != 0) {
         return;

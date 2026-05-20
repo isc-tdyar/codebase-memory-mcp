@@ -21,8 +21,21 @@ typedef struct cbm_dir cbm_dir_t;
 typedef struct {
     char name[CBM_DIRENT_NAME_MAX];
     bool is_dir;
-    unsigned char d_type; /* DT_REG, DT_DIR, DT_LNK, etc. (POSIX only, 0 on Windows) */
+    unsigned char d_type;
 } cbm_dirent_t;
+
+#ifndef DT_UNKNOWN
+#define DT_UNKNOWN 0
+#endif
+#ifndef DT_REG
+#define DT_REG 8
+#endif
+#ifndef DT_DIR
+#define DT_DIR 4
+#endif
+#ifndef DT_LNK
+#define DT_LNK 10
+#endif
 
 /* Open a directory for iteration. Returns NULL on error. */
 cbm_dir_t *cbm_opendir(const char *path);
