@@ -3,7 +3,29 @@
 **Feature**: 021-storage-block-parsing  
 **Created**: 2026-05-21  
 **Priority**: P1 — caused wrong answer in Michael's V3 benchmark Q1  
-**Source**: Michael's V3 Q1: "EXTENTSIZE parameter vs Storage Default ExtentSize — which wins?"
+**Source**: Michael's V3 Q1 + Q4. Research: docs.intersystems.com/GOBJ_storage, grongierisc/iris-persistence schema.py
+
+---
+
+## Research Findings (added after docs + Guillaume's code review)
+
+### From ISC docs (GOBJ_storage)
+The `Storage Default` block is the **authoritative runtime source** for storage metadata. The storage compiler reads `%Dictionary.StorageDefinition.ExtentSize`, not `%Dictionary.ClassDefinition.Parameter("EXTENTSIZE")`. The class parameter is cosmetic — it doesn't affect compilation or query optimization.
+
+Fields in the Storage block XML:
+- `<ExtentSize>` — optimizer row-count estimate (this is what the runtime uses)
+- `<DataLocation>` — actual global for row data (`^ClassName.D`)
+- `<IdLocation>` — ID counter global
+- `<IndexLocation>` — index globals
+- `<StreamLocation>` — stream data globals
+- `<Type>` — storage adapter (`%Storage.Persistent`, `%Storage.Serial`)
+
+### From grongierisc/iris-persistence (schema.py STORAGE_KEYS)
+Guillaume's `STORAGE_KEYS` tuple confirms our field list. He reads them via `%Dictionary.StorageDefinition` at runtime. For source-only analysis, we parse the Storage XData XML.
+
+Key from his `_insert_storage_sql_maps`: **`StorageSQLMapDefinition.Global`** is the actual global name used in SQL maps — the source of hash-truncated names like `^HS.SDA3.Strea2F54` (V3 Q4). Extracting this directly answers "what global does this SQL map actually use?" without live IRIS.
+
+Also: Guillaume reads `StorageStrategy` to find the **active** storage block. A class can have multiple Storage blocks; only the one matching `StorageStrategy` (usually "Default") is the live one. We should only extract the "Default" storage block.
 
 ---
 
@@ -30,9 +52,11 @@ names from `%Dictionary.StorageDefinition` but not the XML fields within.
 ### In scope
 - Parse `Storage Default` XData block XML
 - Extract: `<ExtentSize>`, `<DataLocation>`, `<IdLocation>`, `<IndexLocation>`,
-  `<StreamLocation>`, `<Type>` (the stream-parent class)
+  `<StreamLocation>`, `<Type>` (the storage adapter class)
+- **NEW from research**: Extract SQL map global names from `<SQLMap><Global>` elements → `sql_map_globals` property
 - Store as properties on the Storage node: `extent_size`, `data_global`, `id_global`, 
-  `index_global`, `type`
+  `index_global`, `stream_global`, `type`, `sql_map_globals` (space-separated)
+- **Only extract the active "Default" storage block** (the one matching `StorageStrategy`, typically "Default")
 - Applies to UDL `.cls` files and IRIS Export XML (`.xml`)
 
 ### Out of scope
