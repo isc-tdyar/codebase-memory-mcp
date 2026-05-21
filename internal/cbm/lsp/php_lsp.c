@@ -3899,6 +3899,11 @@ void cbm_run_php_lsp_cross(
         }
     }
 
+    /* Finalize for O(1) lookups during php_lsp_process_file. The trait/PHPDoc
+     * passes above can add to the registry, so finalize comes after them.
+     * See CROSS_FILE_ARCHITECTURE.md §4. */
+    cbm_registry_finalize(&reg);
+
     php_lsp_process_file(&ctx, root);
 
     if (owns_tree && tree) ts_tree_delete(tree);

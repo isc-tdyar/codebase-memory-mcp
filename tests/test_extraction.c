@@ -62,23 +62,19 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-<<<<<<< HEAD
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
     return r;
 }
 
 static CBMFileResult *extract_with_macros(const char *src, CBMLanguage lang, const char *proj,
                                           const char *path, const CBMMacroTable *mt) {
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, mt, NULL);
-=======
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
->>>>>>> fork/014-parallel-mode-wiring
     return r;
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group A: OOP Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Java --- */
 TEST(java_class) {
@@ -319,9 +315,9 @@ TEST(groovy_class) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group B: Systems Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Rust --- */
 TEST(rust_function) {
@@ -433,9 +429,9 @@ TEST(cpp_class) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group C: Scripting / Dynamic Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Python --- */
 TEST(python_function) {
@@ -559,9 +555,9 @@ TEST(r_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group D: Functional Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Elixir --- */
 TEST(elixir_function) {
@@ -610,9 +606,9 @@ TEST(erlang_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group E: Markup / Config / Helper Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- YAML --- */
 TEST(yaml_variables) {
@@ -661,9 +657,9 @@ TEST(dockerfile_stages) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group F: Scientific / Math Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- MATLAB --- */
 TEST(matlab_function) {
@@ -722,9 +718,9 @@ TEST(magma_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group G: v0.5 Expansion Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- F# --- */
 TEST(fsharp_function) {
@@ -784,9 +780,9 @@ TEST(fortran_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group A2: Missing OOP / Systems variants
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Swift struct --- */
 TEST(swift_struct) {
@@ -1056,9 +1052,9 @@ TEST(clojure_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group E2: Missing Config / Markup Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- HTML elements --- */
 TEST(html_elements) {
@@ -1246,9 +1242,9 @@ TEST(vimscript_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H: Scientific / Math — extended tests
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- MATLAB parse (simple expression) --- */
 TEST(matlab_parse) {
@@ -1496,9 +1492,9 @@ TEST(wolfram_nested_def) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H3: ObjectScript return type extraction
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(objectscript_udl_method_return_type) {
     CBMFileResult *r = extract(
@@ -1547,9 +1543,9 @@ TEST(objectscript_udl_scalar_return_type_not_resolved) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H2: ObjectScript macro expansion
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(objectscript_udl_class) {
     CBMFileResult *r = extract(
@@ -1782,9 +1778,9 @@ TEST(objectscript_udl_calls_typed_property) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H2: ObjectScript macro expansion
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(objectscript_macro_expand_system) {
     CBMMacroTable mt;
@@ -1802,8 +1798,12 @@ TEST(objectscript_macro_expand_system) {
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT(has_call(r, "%SYSTEM.Status.IsError"));
+    PASS();
+}
+
+/* ===================================================================
  * Group H3: ObjectScript DATA_FLOWS argument extraction
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 static int find_call_args(const CBMFileResult *r, const char *callee,
                           const char **out_arg0, const char **out_arg1) {
@@ -1897,6 +1897,9 @@ TEST(objectscript_macro_constant_no_extra_call) {
     ASSERT(!has_call(r, "$$$MyConst"));
     cbm_free_result(r);
     cbm_arena_destroy(&arena);
+    PASS();
+}
+
 TEST(objectscript_data_flows_instance_method_args) {
     CBMFileResult *r = extract(
         "Class MyApp.Service Extends %RegisteredObject\n"
@@ -1920,9 +1923,9 @@ TEST(objectscript_data_flows_instance_method_args) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H4: IRIS Export XML → UDL transcoder
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 #define SIMPLE_EXPORT \
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
@@ -2082,9 +2085,9 @@ TEST(iris_export_xml_multi_class) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group I: cbm_test.go ports
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(python_docstring) {
     CBMFileResult *r = extract(
@@ -2132,9 +2135,9 @@ TEST(js_arrow_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group J: language_failures_test.go ports
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* CommonLisp — defun extraction (known limitation: grammar produces list_lit) */
 TEST(commonlisp_defun) {
@@ -2266,9 +2269,9 @@ TEST(julia_function_with_args) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Cross-cutting: Calls + Imports
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(python_calls) {
     CBMFileResult *r =
@@ -2413,13 +2416,13 @@ TEST(import_stress_go) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Embedded-language import extraction
  * Host grammars (Svelte, Vue, HTML, Astro) keep <script> bodies as
  * raw_text — the embedded-imports walker re-parses each block with the
  * JS grammar so the standard ES import extractor sees real
  * import_statement nodes.
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(svelte_imports_basic) {
     /* Default import + named imports + namespace import */
@@ -2494,9 +2497,9 @@ TEST(html_imports_basic) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * config_extraction_test.go ports (25 tests)
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- TOML (8 tests) --- */
 
@@ -2781,9 +2784,9 @@ TEST(markdown_no_headings) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Python __init__.py Module QN collision regression
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(python_init_module_qn_not_collide_with_folder) {
     /* Bug: __init__.py Module QN was identical to the Folder QN for the
@@ -2858,9 +2861,9 @@ TEST(python_regular_module_qn_unchanged) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Suite
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 SUITE(extraction) {
     /* Initialize extraction library */
@@ -3006,6 +3009,7 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_trigger_member);
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_property);
+    RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_macro_expand_system);
     RUN_TEST(objectscript_macro_expand_local);
     RUN_TEST(objectscript_macro_constant_no_extra_call);
