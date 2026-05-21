@@ -117,40 +117,67 @@ Returns:
 }
 ```
 
-## Implementation
+## Implementation — USE IVG (not SQLite)
 
-### Step 1: version parameter in index_repository
+**After discovering `Graph/KG/TemporalIndex.cls` in IVG, the implementation approach changes entirely.** IVG already has production-quality temporal graph infrastructure:
 
-In `mcp.c` `handle_index_repository`:
-- Add `version` string parameter (optional)
-- Pass to pipeline as `ctx->version_tag`
-- All extracted nodes get `version_tag` stored in `properties_json`
+```
+^KG("tout", timestamp, source, predicate, target) = weight  ← outbound temporal edges
+^KG("tin",  timestamp, target, predicate, source) = weight  ← inbound temporal edges
+^KG("bucket", bucket, source)                              ← 5-min velocity buckets
+^KG("tagg", bucket, source, pred, {count/sum/min/max/hll}) ← bucket aggregates + HLL
+^KG("edgeprop", ts, source, pred, target, key)             ← edge attributes
+```
 
-In the glob expansion (`handle_glob_index`):
-- When `project_name` is set (all versions in one DB), auto-derive version from path component
-- e.g., path contains `28.0` → version tag = `28.0`
-- Override with explicit `version` parameter
+`TemporalIndex.InsertEdge` + `QueryWindow` are exactly what we need. Instead of building new SQLite version-diff logic, CBM should export to IVG temporal edges.
 
-### Step 2: Version-aware node properties
+### CBM → IVG version export
 
-In `extract_defs.c` and `pass_definitions.c`:
-- Store `properties_json` field `"version":"28.0"` on every node when version tag is set
-- No changes to graph schema — version is just a node property like `complexity`
+After indexing each version:
+```
+// 28.0 indexing complete → export to IVG
+timestamp_28 = unix_epoch_for("28.0")
+for each class C in 28.0:
+    InsertEdge(C.name, "EXISTS_IN", "hscore/28.0", timestamp=timestamp_28, attrs={base_classes, lines, methods_count})
+    for each method M in C:
+        InsertEdge(M.qualified_name, "METHOD_OF", C.name, timestamp=timestamp_28, attrs={structural_profile, lines})
 
-### Step 3: pass_version_diff
+// 30.0 indexing complete → export to IVG
+timestamp_30 = unix_epoch_for("30.0")
+// same pattern
+```
 
-New pipeline pass that runs after both versions are indexed:
-- Query: find all (Class/Method/etc.) nodes grouped by name, look for name collisions across versions
-- For each collision: compare structural_profile (already extracted for methods)
-- For missing names: emit ADDED_IN or REMOVED_IN tags on the node itself (`"added_in":"30.0"` property)
-- This is a pure-SQL pass on the existing DB — no re-extraction needed
+### V5 queries become IVG temporal queries
 
-### Step 4: diff_versions MCP tool
+```objectscript
+// Q1: Classes in 30.0 not in 28.0
+Set new28 = ##class(Graph.KG.TemporalIndex).QueryWindow("", "EXISTS_IN", ts28, ts28)
+Set new30 = ##class(Graph.KG.TemporalIndex).QueryWindow("", "EXISTS_IN", ts30, ts30)
+// set difference → new classes
 
-New entry in `TOOLS[]` array. Implementation calls:
-1. `SELECT name FROM nodes WHERE properties_json LIKE '%"version":"NEW"%' AND name NOT IN (SELECT name FROM nodes WHERE properties_json LIKE '%"version":"OLD"%')`
-2. Same inverted for removals
-3. Structural profile comparison for changes
+// Q4: Classes deleted between 28.0 and 30.0  
+// same, inverted
+
+// Q2: Classes where base_classes edge attribute changed
+// Compare attrs from QueryWindow for same class name between ts28 and ts30
+```
+
+### Why IVG is better than new SQLite pass
+
+1. **Already implemented** — `TemporalIndex.cls` is production code with HLL, bucketing, velocity
+2. **Time-travel queries** — "what did the graph look like at timestamp T?" is native
+3. **Velocity/burst detection** — `FindBursts` finds which classes changed most between releases
+4. **Streaming ingest** — `BulkInsert` handles large version exports efficiently
+5. **Cross-version joins** are natural temporal window queries, not special-cased diff logic
+
+### Revised spec for CBM side
+
+CBM needs only:
+1. `export_to_ivg` parameter on `index_repository` — triggers post-index export to IVG temporal graph
+2. Version tag derived from path or explicit `version` parameter  
+3. A `diff_versions` tool that queries IVG via the Bolt endpoint
+
+The heavy lifting is entirely in IVG. CBM is the source; IVG is the temporal query engine.
 
 ## Acceptance Criteria
 
