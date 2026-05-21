@@ -64,7 +64,7 @@ typedef struct {
 } CBMRegistryHashEntry;
 
 // Cross-file type/function registry.
-typedef struct {
+typedef struct CBMTypeRegistry {
     CBMRegisteredFunc* funcs;
     int func_count;
     int func_cap;
@@ -92,10 +92,28 @@ typedef struct {
     CBMRegistryHashEntry* method_entries;
     int method_bucket_count;
     int method_entry_count;
+
+    // Optional fallback registry consulted when a lookup misses in this one.
+    // Used by the per-file → project-wide-shared registry chain: each file's
+    // registry holds only file-local additions; the shared registry holds the
+    // (large, finalized once) stdlib + cross-file defs. Lookups try this
+    // registry's small linear scan first, then fall through to the shared
+    // registry's O(1) hashed lookup. NULL = no fallback.
+    //
+    // The fallback is treated as read-only. This registry's add_* functions
+    // never touch it. Multiple per-file registries can share a single fallback
+    // safely under concurrent reads, since the fallback's hash buckets and
+    // entries arrays are immutable after cbm_registry_finalize().
+    const struct CBMTypeRegistry* fallback;
 } CBMTypeRegistry;
 
 // Initialize a registry.
 void cbm_registry_init(CBMTypeRegistry* reg, CBMArena* arena);
+
+// Set a fallback registry for chained lookups. Calls to lookup_func / _type /
+// _method that miss in `reg` will retry against `fallback`. Pass NULL to clear.
+// `fallback` must outlive `reg` and remain unmodified for concurrent-safe reads.
+void cbm_registry_set_fallback(CBMTypeRegistry* reg, const CBMTypeRegistry* fallback);
 
 // Build the hash indexes after all funcs/types have been added. Subsequent lookups
 // use O(1) hashed dispatch instead of linear scans. Calling this is OPTIONAL — the

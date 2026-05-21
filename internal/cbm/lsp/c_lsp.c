@@ -4558,29 +4558,13 @@ void cbm_run_c_lsp(CBMArena* arena, CBMFileResult* result,
 }
 
 // ============================================================================
-// Entry point: cross-file LSP
+// Cross-file def registration (shared between cbm_run_c_lsp_cross and the
+// shared-registry build entry point). Writes type/func entries into reg.
 // ============================================================================
 
-void cbm_run_c_lsp_cross(
-    CBMArena* arena,
-    const char* source, int source_len,
-    const char* module_qn,
-    bool cpp_mode,
-    CBMLSPDef* defs, int def_count,
-    const char** include_paths, const char** include_ns_qns, int include_count,
-    TSTree* cached_tree,
-    CBMResolvedCallArray* out) {
-
-    if (!source || source_len == 0 || !out) return;
-
-    CBMTypeRegistry reg;
-    cbm_registry_init(&reg, arena);
-
-    // Register stdlib
-    cbm_c_stdlib_register(&reg, arena);
-    if (cpp_mode) cbm_cpp_stdlib_register(&reg, arena);
-
-    // Register all defs
+static void register_c_cross_defs(CBMArena* arena, CBMTypeRegistry* reg,
+                                  CBMLSPDef* defs, int def_count,
+                                  const char* module_qn) {
     for (int i = 0; i < def_count; i++) {
         CBMLSPDef* d = &defs[i];
         if (!d->qualified_name || !d->short_name) continue;
@@ -4595,7 +4579,6 @@ void cbm_run_c_lsp_cross(
 
             // Embedded/base types
             if (d->embedded_types) {
-                // Parse "|"-separated list
                 const char* src = d->embedded_types;
                 const char* embeds[32];
                 int embed_count = 0;
@@ -4649,7 +4632,7 @@ void cbm_run_c_lsp_cross(
                 }
             }
 
-            cbm_registry_add_type(&reg, rt);
+            cbm_registry_add_type(reg, rt);
         }
 
         if (d->label && (strcmp(d->label, "Function") == 0 || strcmp(d->label, "Method") == 0)) {
@@ -4661,9 +4644,7 @@ void cbm_run_c_lsp_cross(
 
             const char* def_module = d->def_module_qn ? d->def_module_qn : module_qn;
 
-            // Return types
             if (d->return_types) {
-                // Parse "|"-separated
                 const char* rsrc = d->return_types;
                 const CBMType* rets[16];
                 int rcount = 0;
@@ -4688,9 +4669,36 @@ void cbm_run_c_lsp_cross(
                 rf.receiver_type = cbm_arena_strdup(arena, d->receiver_type);
             }
 
-            cbm_registry_add_func(&reg, rf);
+            cbm_registry_add_func(reg, rf);
         }
     }
+}
+
+// ============================================================================
+// Entry point: cross-file LSP
+// ============================================================================
+
+void cbm_run_c_lsp_cross(
+    CBMArena* arena,
+    const char* source, int source_len,
+    const char* module_qn,
+    bool cpp_mode,
+    CBMLSPDef* defs, int def_count,
+    const char** include_paths, const char** include_ns_qns, int include_count,
+    TSTree* cached_tree,
+    CBMResolvedCallArray* out) {
+
+    if (!source || source_len == 0 || !out) return;
+
+    CBMTypeRegistry reg;
+    cbm_registry_init(&reg, arena);
+
+    // Register stdlib
+    cbm_c_stdlib_register(&reg, arena);
+    if (cpp_mode) cbm_cpp_stdlib_register(&reg, arena);
+
+    // Register all defs
+    register_c_cross_defs(arena, &reg, defs, def_count, module_qn);
 
     // Use cached tree if available, otherwise parse fresh
     TSParser* parser = NULL;
@@ -4721,6 +4729,75 @@ void cbm_run_c_lsp_cross(
     c_lsp_init(&ctx, arena, source, source_len, &reg, module_qn, cpp_mode, out);
 
     // Add include mappings
+    for (int i = 0; i < include_count; i++) {
+        c_lsp_add_include(&ctx, include_paths[i], include_ns_qns[i]);
+    }
+
+    c_lsp_process_file(&ctx, root);
+
+    if (owns_tree) {
+        ts_tree_delete(tree);
+    }
+}
+
+// ============================================================================
+// Shared-registry entry points (per CROSS_FILE_ARCHITECTURE.md §3 Pass 1.5)
+// ============================================================================
+
+void cbm_c_build_shared_registry(CBMArena* arena, CBMTypeRegistry* reg,
+                                 bool cpp_mode,
+                                 CBMLSPDef* defs, int def_count,
+                                 const char* module_qn) {
+    if (!arena || !reg) return;
+    cbm_registry_init(reg, arena);
+    cbm_c_stdlib_register(reg, arena);
+    if (cpp_mode) cbm_cpp_stdlib_register(reg, arena);
+    register_c_cross_defs(arena, reg, defs, def_count, module_qn);
+    cbm_registry_finalize(reg);
+}
+
+void cbm_run_c_lsp_cross_shared(
+    CBMArena* arena,
+    const char* source, int source_len,
+    const char* module_qn,
+    bool cpp_mode,
+    const CBMTypeRegistry* shared_reg,
+    const char** include_paths, const char** include_ns_qns, int include_count,
+    TSTree* cached_tree,
+    CBMResolvedCallArray* out)
+{
+    if (!source || source_len == 0 || !out || !shared_reg) return;
+
+    // Per-file registry holds only file-local additions (e.g. class methods
+    // discovered during c_lsp_process_file's AST walk). Stdlib + cross-file
+    // defs live in shared_reg, consulted via the fallback chain on lookup miss.
+    CBMTypeRegistry reg;
+    cbm_registry_init(&reg, arena);
+    cbm_registry_set_fallback(&reg, shared_reg);
+
+    TSParser* parser = NULL;
+    TSTree* tree = cached_tree;
+    bool owns_tree = false;
+    if (!tree) {
+        parser = ts_parser_new();
+        if (!parser) return;
+        const TSLanguage* ts_lang = cpp_mode ? tree_sitter_cpp() : tree_sitter_c();
+        ts_parser_set_language(parser, ts_lang);
+        tree = ts_parser_parse_string(parser, NULL, source, source_len);
+        ts_parser_delete(parser);
+        owns_tree = true;
+        if (!tree) return;
+    }
+
+    TSNode root = ts_tree_root_node(tree);
+
+    // No need to finalize the per-file registry: it's small (only file-local
+    // adds), so its linear-scan path is cheap. Lookups that miss locally fall
+    // through to shared_reg's hashed lookup automatically.
+
+    CLSPContext ctx;
+    c_lsp_init(&ctx, arena, source, source_len, &reg, module_qn, cpp_mode, out);
+
     for (int i = 0; i < include_count; i++) {
         c_lsp_add_include(&ctx, include_paths[i], include_ns_qns[i]);
     }

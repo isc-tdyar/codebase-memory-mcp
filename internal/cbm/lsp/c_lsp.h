@@ -120,6 +120,32 @@ void cbm_c_stdlib_register(CBMTypeRegistry* reg, CBMArena* arena);
 // Register C++ stdlib types and functions into a registry.
 void cbm_cpp_stdlib_register(CBMTypeRegistry* reg, CBMArena* arena);
 
+// Build a project-wide shared registry once: stdlib + cross-file defs +
+// finalize. Reused via the registry-fallback chain across all per-file
+// cbm_run_c_lsp_cross_shared calls in a pass. Per CROSS_FILE_ARCHITECTURE.md §3.
+void cbm_c_build_shared_registry(CBMArena* arena, CBMTypeRegistry* reg,
+                                 bool cpp_mode,
+                                 CBMLSPDef* defs, int def_count,
+                                 const char* module_qn);
+
+// Cross-file LSP variant that uses a pre-built shared registry as fallback.
+// Each file gets a small per-file registry that holds only file-local
+// additions (class methods discovered during c_lsp_process_file). Lookups
+// hit per-file first, then fall through to the shared registry's hashed
+// O(1) lookup. Skips per-file stdlib + def registration — that's the win.
+//
+// shared_reg must be finalized and remain unmodified for the duration of
+// this call. Multiple parallel callers are safe (read-only chained lookups).
+void cbm_run_c_lsp_cross_shared(
+    CBMArena* arena,
+    const char* source, int source_len,
+    const char* module_qn,
+    bool cpp_mode,
+    const CBMTypeRegistry* shared_reg,
+    const char** include_paths, const char** include_ns_qns, int include_count,
+    TSTree* cached_tree,
+    CBMResolvedCallArray* out);
+
 // --- Batch cross-file LSP ---
 
 // Per-file input for batch C/C++ LSP processing.

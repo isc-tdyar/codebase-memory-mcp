@@ -132,6 +132,11 @@ void cbm_registry_init(CBMTypeRegistry* reg, CBMArena* arena) {
     reg->arena = arena;
 }
 
+void cbm_registry_set_fallback(CBMTypeRegistry* reg, const CBMTypeRegistry* fallback) {
+    if (!reg) return;
+    reg->fallback = fallback;
+}
+
 void cbm_registry_add_func(CBMTypeRegistry* reg, CBMRegisteredFunc func) {
     if (reg->func_count >= reg->func_cap) {
         int new_cap = reg->func_cap == 0 ? 64 : reg->func_cap * 2;
@@ -180,6 +185,10 @@ const CBMRegisteredFunc* cbm_registry_lookup_method(const CBMTypeRegistry* reg,
                 return f;
             }
         }
+        // Miss in hashed path: try fallback before giving up.
+        if (reg->fallback) {
+            return cbm_registry_lookup_method(reg->fallback, receiver_qn, method_name);
+        }
         return NULL;
     }
 
@@ -190,6 +199,9 @@ const CBMRegisteredFunc* cbm_registry_lookup_method(const CBMTypeRegistry* reg,
             strcmp(f->short_name, method_name) == 0) {
             return f;
         }
+    }
+    if (reg->fallback) {
+        return cbm_registry_lookup_method(reg->fallback, receiver_qn, method_name);
     }
     return NULL;
 }
@@ -210,6 +222,9 @@ const CBMRegisteredType* cbm_registry_lookup_type(const CBMTypeRegistry* reg,
                 return &reg->types[p];
             }
         }
+        if (reg->fallback) {
+            return cbm_registry_lookup_type(reg->fallback, qualified_name);
+        }
         return NULL;
     }
 
@@ -217,6 +232,9 @@ const CBMRegisteredType* cbm_registry_lookup_type(const CBMTypeRegistry* reg,
         if (strcmp(reg->types[i].qualified_name, qualified_name) == 0) {
             return &reg->types[i];
         }
+    }
+    if (reg->fallback) {
+        return cbm_registry_lookup_type(reg->fallback, qualified_name);
     }
     return NULL;
 }
@@ -237,6 +255,9 @@ const CBMRegisteredFunc* cbm_registry_lookup_func(const CBMTypeRegistry* reg,
                 return &reg->funcs[p];
             }
         }
+        if (reg->fallback) {
+            return cbm_registry_lookup_func(reg->fallback, qualified_name);
+        }
         return NULL;
     }
 
@@ -244,6 +265,9 @@ const CBMRegisteredFunc* cbm_registry_lookup_func(const CBMTypeRegistry* reg,
         if (strcmp(reg->funcs[i].qualified_name, qualified_name) == 0) {
             return &reg->funcs[i];
         }
+    }
+    if (reg->fallback) {
+        return cbm_registry_lookup_func(reg->fallback, qualified_name);
     }
     return NULL;
 }
