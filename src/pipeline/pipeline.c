@@ -78,6 +78,7 @@ struct cbm_pipeline {
     cbm_index_mode_t mode;
     atomic_int cancelled;
     bool persistence;
+    char *version_tag;
 
     /* IRIS %Dictionary ingest (optional — NULL if not configured) */
     char *iris_host;
@@ -156,6 +157,12 @@ void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
     }
 }
 
+void cbm_pipeline_set_version(cbm_pipeline_t *p, const char *version_tag) {
+    if (!p) return;
+    free(p->version_tag);
+    p->version_tag = version_tag ? strdup(version_tag) : NULL;
+}
+
 void cbm_pipeline_set_iris(cbm_pipeline_t *p,
                            const char *host, int port,
                            const char *ns, const char *user,
@@ -182,6 +189,7 @@ void cbm_pipeline_free(cbm_pipeline_t *p) {
     free(p->iris_user);
     free(p->iris_pass);
     free(p->iris_package_filter);
+    free(p->version_tag);
     /* gbuf, store, registry freed during/after run */
     /* Defensively free userconfig in case run() was never called or panicked */
     if (p->userconfig) {
@@ -991,6 +999,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         .cancelled = &p->cancelled,
         .mode = (int)p->mode,
         .path_aliases = path_aliases,
+        .version_tag = p->version_tag,
     };
 
     rc = run_extraction_phase(p, &ctx, files, file_count);

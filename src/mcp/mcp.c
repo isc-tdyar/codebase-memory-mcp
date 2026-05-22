@@ -304,7 +304,15 @@ static const tool_def_t TOOLS[] = {
      "Example: project_name=\\\"healthshare-latest\\\" with repo_path=\\\".../*/latest/.../cls\\\" "
      "creates one queryable graph across all components. "
      "Frank's use case: project_name=\\\"hscommunity-compare\\\" with "
-     "\\\"hscommunity/{15.x,latest}/databases/hscommlib/cls\\\" indexes both versions together.\"}"
+     "\\\"hscommunity/{15.x,latest}/databases/hscommlib/cls\\\" indexes both versions together.\"},"
+     "\"version\":{\"type\":\"string\",\"description\":"
+     "\"Optional version tag stored on every extracted node as a \\\"version\\\" property. "
+     "Enables cross-version diff queries: index 28.0 with version='28.0' and 30.0 with "
+     "version='30.0' into the same project_name, then query: "
+     "MATCH (n:Class {version:'30.0'}) OPTIONAL MATCH (m:Class {version:'28.0'}) "
+     "WHERE m.name=n.name AND m IS NULL RETURN n.name (new classes in 30.0). "
+     "Auto-derived from path when not set and path contains a version-like segment "
+     "(e.g. '28.0', '15.x', '30.0').\"}"
      "},\"required\":[\"repo_path\"]}"},
 
     {"search_graph",
@@ -2542,6 +2550,36 @@ static bool path_has_glob(const char *path) {
     return false;
 }
 
+static void cbm_derive_version_from_path(const char *path, char *out, size_t out_sz) {
+    out[0] = '\0';
+    if (!path) return;
+    const char *p = path;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        size_t seg_len = slash ? (size_t)(slash - p) : strlen(p);
+        if (seg_len > 0 && seg_len < out_sz) {
+            char seg[256];
+            if (seg_len >= sizeof(seg)) { p = slash ? slash + 1 : p + seg_len; continue; }
+            memcpy(seg, p, seg_len);
+            seg[seg_len] = '\0';
+            int has_digit = 0, has_dot = 0, only_ver = 1;
+            for (size_t i = 0; i < seg_len; i++) {
+                char c = seg[i];
+                if (c >= '0' && c <= '9') has_digit = 1;
+                else if (c == '.' || c == '-' || c == '_') { if (c == '.') has_dot = 1; }
+                else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {}
+                else only_ver = 0;
+            }
+            if (has_digit && has_dot && only_ver) {
+                memcpy(out, seg, seg_len + 1);
+                return;
+            }
+        }
+        p = slash ? slash + 1 : p + seg_len;
+        if (!slash) break;
+    }
+}
+
 #ifndef _WIN32
 static char *glob_clean_path(const char *raw) {
     if (!raw) return NULL;
@@ -2713,6 +2751,7 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     free(mode_str);
 
     bool persistence = cbm_mcp_get_bool_arg(args, "persistence");
+    char *version_tag = cbm_mcp_get_string_arg(args, "version");
 
     char *iris_host   = cbm_mcp_get_string_arg(args, "iris_host");
     char *iris_ns     = cbm_mcp_get_string_arg(args, "iris_namespace");
@@ -2734,6 +2773,15 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         cbm_pipeline_set_iris(p, iris_host, iris_port, iris_ns, iris_user, iris_pass, iris_pkg);
     }
     free(iris_host); free(iris_ns); free(iris_user); free(iris_pass); free(iris_pkg);
+
+    if (version_tag && version_tag[0]) {
+        cbm_pipeline_set_version(p, version_tag);
+    } else if (repo_path) {
+        char derived[64] = {0};
+        cbm_derive_version_from_path(repo_path, derived, sizeof(derived));
+        if (derived[0]) cbm_pipeline_set_version(p, derived);
+    }
+    free(version_tag);
 
     char *project_name = heap_strdup(cbm_pipeline_project_name(p));
 

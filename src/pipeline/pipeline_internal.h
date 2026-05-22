@@ -72,6 +72,7 @@ typedef struct {
 
     const CBMMacroTable *macro_table;
     const CBMReturnTypeTable *return_type_table;
+    const char *version_tag;
 } cbm_pipeline_ctx_t;
 
 /* Get the current pipeline's package map (NULL if none). */

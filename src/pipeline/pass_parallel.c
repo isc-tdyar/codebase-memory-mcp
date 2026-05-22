@@ -242,7 +242,8 @@ static void append_json_str_array(char *buf, size_t bufsize, size_t *pos, const 
     *pos = p;
 }
 
-static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def) {
+static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
+                             const char *version_tag) {
     int n = snprintf(buf, bufsize,
                      "{\"complexity\":%d,\"lines\":%d,\"is_exported\":%s,"
                      "\"is_test\":%s,\"is_entry_point\":%s",
@@ -281,6 +282,10 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def)
     /* Body tokens — raw identifiers from function body AST for semantic search. */
     if (def->body_tokens && pos + CBM_SZ_512 < bufsize) {
         append_json_string(buf, bufsize, &pos, "bt", def->body_tokens);
+    }
+
+    if (version_tag && version_tag[0] && pos + CBM_SZ_256 < bufsize) {
+        append_json_string(buf, bufsize, &pos, "version", version_tag);
     }
 
     if (pos < bufsize - SKIP_ONE) {
@@ -448,13 +453,14 @@ typedef struct {
     cbm_pkg_entries_t *pkg_entries;
     const CBMMacroTable *macro_table;
     const CBMReturnTypeTable *return_type_table;
+    const char *version_tag;
 } extract_ctx_t;
 
 /* Insert one definition node (and its route if present) into the local gbuf. */
 static void insert_def_into_gbuf(extract_worker_state_t *ws, const cbm_file_info_t *fi,
-                                 CBMDefinition *def) {
+                                 CBMDefinition *def, const char *version_tag) {
     char props[CBM_SZ_2K];
-    build_def_props(props, sizeof(props), def);
+    build_def_props(props, sizeof(props), def, version_tag);
     int64_t func_id =
         cbm_gbuf_upsert_node(ws->local_gbuf, def->label ? def->label : "Function", def->name,
                              def->qualified_name, def->file_path ? def->file_path : fi->rel_path,
@@ -542,7 +548,7 @@ static void extract_worker(int worker_id, void *ctx_ptr) {
                 for (int d = 0; d < xr->defs.count; d++) {
                     CBMDefinition *def = &xr->defs.items[d];
                     if (def->qualified_name && def->name)
-                        insert_def_into_gbuf(ws, fi, def);
+                        insert_def_into_gbuf(ws, fi, def, ec->version_tag);
                 }
                 cbm_free_tree(xr);
                 cbm_free_result(xr);
@@ -569,7 +575,7 @@ static void extract_worker(int worker_id, void *ctx_ptr) {
         for (int d = 0; d < result->defs.count; d++) {
             CBMDefinition *def = &result->defs.items[d];
             if (def->qualified_name && def->name) {
-                insert_def_into_gbuf(ws, fi, def);
+                insert_def_into_gbuf(ws, fi, def, ec->version_tag);
             }
         }
 
@@ -730,6 +736,7 @@ int cbm_parallel_extract(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
         .pkg_entries = pkg_entries,
         .macro_table = macro_table_owned,
         .return_type_table = ctx->return_type_table,
+        .version_tag = ctx->version_tag,
     };
     atomic_init(&ec.next_worker_id, 0);
     atomic_init(&ec.next_file_idx, 0);

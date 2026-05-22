@@ -171,7 +171,8 @@ static void append_json_str_array(char *buf, size_t bufsize, size_t *pos, const 
 }
 
 /* Build properties JSON for a definition node. */
-static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def) {
+static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
+                             const char *version_tag) {
     int n = snprintf(buf, bufsize,
                      "{\"complexity\":%d,\"lines\":%d,\"is_exported\":%s,"
                      "\"is_test\":%s,\"is_entry_point\":%s",
@@ -212,6 +213,11 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def)
         append_json_string(buf, bufsize, &pos, "bt", def->body_tokens);
     }
 
+    /* Version tag for cross-version diff queries */
+    if (version_tag && version_tag[0] && pos + CBM_SZ_256 < bufsize) {
+        append_json_string(buf, bufsize, &pos, "version", version_tag);
+    }
+
     if (pos < bufsize - SKIP_ONE) {
         buf[pos] = '}';
         buf[pos + SKIP_ONE] = '\0';
@@ -224,7 +230,7 @@ static void process_def(cbm_pipeline_ctx_t *ctx, const CBMDefinition *def, const
         return;
     }
     char props[CBM_SZ_2K];
-    build_def_props(props, sizeof(props), def);
+    build_def_props(props, sizeof(props), def, ctx->version_tag);
     int64_t node_id = cbm_gbuf_upsert_node(
         ctx->gbuf, def->label ? def->label : "Function", def->name, def->qualified_name,
         def->file_path ? def->file_path : rel, (int)def->start_line, (int)def->end_line, props);
