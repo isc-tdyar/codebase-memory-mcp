@@ -699,7 +699,7 @@ static int try_incremental_or_delete_db(cbm_pipeline_t *p, cbm_file_info_t *file
         return CBM_NOT_FOUND;
     }
     cbm_store_t *check_store = cbm_store_open_path(db_path);
-    if (check_store && cbm_store_check_integrity(check_store)) {
+    if (check_store && cbm_store_check_integrity(check_store) && !p->version_tag) {
         cbm_file_hash_t *hashes = NULL;
         int hash_count = 0;
         cbm_store_get_file_hashes(check_store, p->project_name, &hashes, &hash_count);
@@ -924,6 +924,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     if (!p) {
         return CBM_NOT_FOUND;
     }
+    
 
     CBM_PROF_START(t_pipeline_total);
     struct timespec t0;
@@ -1001,6 +1002,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         .path_aliases = path_aliases,
         .version_tag = p->version_tag,
     };
+    
 
     rc = run_extraction_phase(p, &ctx, files, file_count);
     if (rc != 0) {

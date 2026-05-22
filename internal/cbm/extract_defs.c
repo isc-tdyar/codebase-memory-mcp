@@ -1,8 +1,10 @@
 #include "cbm.h"
-#include "arena.h" // CBMArena, cbm_arena_alloc/strdup/sprintf
+#include "arena.h"
 #include "helpers.h"
 #include "lang_specs.h"
 #include "foundation/constants.h"
+#include <stdio.h>
+#include <string.h>
 #include "extract_node_stack.h"
 #include "simhash/minhash.h"
 #include "semantic/ast_profile.h"
@@ -3494,6 +3496,82 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
                         mdef.file_path = ctx->rel_path;
                         mdef.start_line = ts_node_start_point(child).row + TS_LINE_OFFSET;
                         mdef.end_line   = ts_node_end_point(child).row  + TS_LINE_OFFSET;
+
+                        if (strcmp(member_label, "Storage") == 0) {
+                            TSNode body = cbm_find_child_by_kind(child, "storage_body");
+                            if (!ts_node_is_null(body)) {
+                                char *xml = cbm_node_text(a, body, ctx->source);
+                                if (xml) {
+                                    char props[CBM_SZ_2K];
+                                    int pos = snprintf(props, sizeof(props), "{");
+                                    static const struct { const char *tag; const char *key; } kv[] = {
+                                        {"ExtentSize",    "extent_size"},
+                                        {"DataLocation",  "data_global"},
+                                        {"IdLocation",    "id_global"},
+                                        {"IndexLocation", "index_global"},
+                                        {"StreamLocation","stream_global"},
+                                        {"Type",          "storage_type"},
+                                        {NULL, NULL}
+                                    };
+                                    bool first = true;
+                                    for (int ki = 0; kv[ki].tag; ki++) {
+                                        char open[64], close[64], buf[256];
+                                        snprintf(open,  sizeof(open),  "<%s>",  kv[ki].tag);
+                                        snprintf(close, sizeof(close), "</%s>", kv[ki].tag);
+                                        const char *s = strstr(xml, open);
+                                        if (!s) continue;
+                                        s += strlen(open);
+                                        const char *e = strstr(s, close);
+                                        if (!e) continue;
+                                        size_t vlen = (size_t)(e - s);
+                                        if (vlen >= sizeof(buf)) vlen = sizeof(buf)-1;
+                                        memcpy(buf, s, vlen); buf[vlen] = '\0';
+                                        char esc[300]; int ei = 0;
+                                        for (size_t ci = 0; ci < vlen && ei < (int)sizeof(esc)-2; ci++) {
+                                            if (buf[ci] == '"' || buf[ci] == '\\') esc[ei++] = '\\';
+                                            esc[ei++] = buf[ci];
+                                        }
+                                        esc[ei] = '\0';
+                                        pos += snprintf(props+pos, sizeof(props)-pos,
+                                            "%s\"%s\":\"%s\"",
+                                            first ? "" : ",", kv[ki].key, esc);
+                                        first = false;
+                                    }
+                                    const char *sql_tag = "<Global>";
+                                    const char *sql_end = "</Global>";
+                                    char sql_map_buf[512]; int smi = 0;
+                                    const char *sp = xml;
+                                    bool sql_first = true;
+                                    while ((sp = strstr(sp, sql_tag)) != NULL) {
+                                        sp += strlen(sql_tag);
+                                        const char *ep = strstr(sp, sql_end);
+                                        if (!ep) break;
+                                        size_t glen = (size_t)(ep - sp);
+                                        if (smi + (int)glen + 2 < (int)sizeof(sql_map_buf) - 1) {
+                                            if (!sql_first) sql_map_buf[smi++] = ' ';
+                                            memcpy(sql_map_buf + smi, sp, glen);
+                                            smi += (int)glen;
+                                            sql_first = false;
+                                        }
+                                        sp = ep + strlen(sql_end);
+                                    }
+                                    sql_map_buf[smi] = '\0';
+                                    if (smi > 0) {
+                                        pos += snprintf(props+pos, sizeof(props)-pos,
+                                            "%s\"sql_map_globals\":\"%s\"",
+                                            first ? "" : ",", sql_map_buf);
+                                        first = false;
+                                    }
+                                    if (pos < (int)sizeof(props)-1) {
+                                        props[pos++] = '}'; props[pos] = '\0';
+                                    }
+                                    if (!first) {
+                                        mdef.docstring = cbm_arena_strdup(a, props);
+                                    }
+                                }
+                            }
+                        }
+
                         cbm_defs_push(&ctx->result->defs, a, mdef);
                     }
                 }

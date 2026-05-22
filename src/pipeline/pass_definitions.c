@@ -184,7 +184,11 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
         return;
     }
     size_t pos = (size_t)n;
-    append_json_string(buf, bufsize, &pos, "docstring", def->docstring);
+    bool is_storage_with_meta = def->label && strcmp(def->label, "Storage") == 0 &&
+                                def->docstring && def->docstring[0] == '{';
+    if (!is_storage_with_meta) {
+        append_json_string(buf, bufsize, &pos, "docstring", def->docstring);
+    }
     append_json_string(buf, bufsize, &pos, "signature", def->signature);
     append_json_string(buf, bufsize, &pos, "return_type", def->return_type);
     append_json_string(buf, bufsize, &pos, "parent_class", def->parent_class);
@@ -216,6 +220,21 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
     /* Version tag for cross-version diff queries */
     if (version_tag && version_tag[0] && pos + CBM_SZ_256 < bufsize) {
         append_json_string(buf, bufsize, &pos, "version", version_tag);
+    }
+
+    /* Storage block parsed fields — stored as raw JSON fragment in docstring.
+     * Merge inline instead of escaping: {"extent_size":"...","data_global":"...",...} */
+    if (def->label && strcmp(def->label, "Storage") == 0 &&
+        def->docstring && def->docstring[0] == '{') {
+        const char *frag = def->docstring + 1;
+        size_t flen = strlen(frag);
+        if (flen > 1 && frag[flen-1] == '}') flen--;
+        if (pos + flen + 2 < bufsize) {
+            buf[pos++] = ',';
+            memcpy(buf + pos, frag, flen);
+            pos += flen;
+        }
+        /* Clear docstring so it doesn't get double-appended above */
     }
 
     if (pos < bufsize - SKIP_ONE) {
