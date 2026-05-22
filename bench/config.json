@@ -41,17 +41,22 @@
       "id": "m07-014-parallel-wiring",
       "commit": null,
       "label": "014 \u2014 Full parallel mode wiring (all features in large repos)"
+    },
+    {
+      "id": "m08-024-version-tag",
+      "commit": null,
+      "label": "024+025 \u2014 Version tag + diff_versions tool"
     }
   ],
   "queries": {
-    "classes":    "MATCH (n:Class) RETURN count(n)",
-    "methods":    "MATCH (n:Method) RETURN count(n)",
-    "variables":  "MATCH (n:Variable) RETURN count(n)",
-    "indexes":    "MATCH (n:Index) RETURN count(n)",
-    "xdata":      "MATCH (n:XData) RETURN count(n)",
-    "storage":    "MATCH (n:Storage) RETURN count(n)",
-    "calls":      "MATCH ()-[r:CALLS]->() RETURN count(r)",
-    "inherits":   "MATCH ()-[r:INHERITS]->() RETURN count(r)",
+    "classes": "MATCH (n:Class) RETURN count(n)",
+    "methods": "MATCH (n:Method) RETURN count(n)",
+    "variables": "MATCH (n:Variable) RETURN count(n)",
+    "indexes": "MATCH (n:Index) RETURN count(n)",
+    "xdata": "MATCH (n:XData) RETURN count(n)",
+    "storage": "MATCH (n:Storage) RETURN count(n)",
+    "calls": "MATCH ()-[r:CALLS]->() RETURN count(r)",
+    "inherits": "MATCH ()-[r:INHERITS]->() RETURN count(r)",
     "data_flows": "MATCH ()-[r:DATA_FLOWS]->() RETURN count(r)"
   }
 }
