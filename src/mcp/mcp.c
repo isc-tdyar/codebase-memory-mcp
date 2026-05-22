@@ -442,6 +442,18 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"}},\"required\":["
      "\"project\"]}"},
 
+    {"diff_versions",
+     "Compare two indexed versions of the same project to find added, removed, and changed nodes. "
+     "Requires version tags set via index_repository version= parameter. "
+     "Returns lists of added/removed/changed nodes with file paths.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Project name (shared by both versions)\"},"
+     "\"from_version\":{\"type\":\"string\",\"description\":\"The baseline version tag (e.g. '28.0')\"},"
+     "\"to_version\":{\"type\":\"string\",\"description\":\"The comparison version tag (e.g. '30.0')\"},"
+     "\"label\":{\"type\":\"string\",\"default\":\"Class\","
+     "\"description\":\"Node label to diff: Class, Method, Function. Default: Class.\"}"
+     "},\"required\":[\"project\",\"from_version\",\"to_version\"]}"},
+
     {"detect_changes", "Detect code changes and their impact",
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"scope\":{\"type\":"
      "\"string\"},\"depth\":{\"type\":\"integer\",\"default\":2},\"base_branch\":{\"type\":"
@@ -3945,6 +3957,99 @@ static void detect_add_impacted_symbols(cbm_store_t *store, const char *project,
     cbm_store_free_nodes(nodes, ncount);
 }
 
+static int run_diff_query(cbm_store_t *store, const char *project,
+                          const char *from_v, const char *to_v,
+                          const char *label,
+                          yyjson_mut_doc *doc, yyjson_mut_val *arr,
+                          const char *change_type) {
+    char qa[CBM_SZ_1K], qb[CBM_SZ_1K];
+    const char *va = (strcmp(change_type, "added") == 0) ? to_v : from_v;
+    const char *vb = (strcmp(change_type, "added") == 0) ? from_v : to_v;
+
+    if (strcmp(change_type, "changed") == 0) {
+        return 0;
+    }
+
+    snprintf(qa, sizeof(qa),
+        "MATCH (n:%s {version:'%s'}) RETURN n.name, n.file_path",
+        label, va);
+    snprintf(qb, sizeof(qb),
+        "MATCH (n:%s {version:'%s'}) RETURN n.name",
+        label, vb);
+
+    cbm_cypher_result_t ra = {0}, rb = {0};
+    cbm_cypher_execute(store, qa, project, 2000, &ra);
+    cbm_cypher_execute(store, qb, project, 2000, &rb);
+
+    int count = 0;
+    for (int r = 0; r < ra.row_count && count < 500; r++) {
+        const char *name = ra.rows[r][0];
+        if (!name) continue;
+        bool found = false;
+        for (int i = 0; i < rb.row_count && !found; i++) {
+            if (rb.rows[i][0] && strcmp(rb.rows[i][0], name) == 0) found = true;
+        }
+        if (found) continue;
+        yyjson_mut_val *obj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, obj, "change", change_type);
+        yyjson_mut_obj_add_str(doc, obj, "label", label);
+        yyjson_mut_obj_add_strcpy(doc, obj, "name", name);
+        const char *fp = (ra.col_count > 1) ? ra.rows[r][1] : NULL;
+        if (fp) yyjson_mut_obj_add_strcpy(doc, obj, "file_path", fp);
+        yyjson_mut_arr_append(arr, obj);
+        count++;
+    }    cbm_cypher_result_free(&ra);
+    cbm_cypher_result_free(&rb);
+    return count;
+}
+
+static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
+    char *project   = cbm_mcp_get_string_arg(args, "project");
+    char *from_v    = cbm_mcp_get_string_arg(args, "from_version");
+    char *to_v      = cbm_mcp_get_string_arg(args, "to_version");
+    char *label_arg = cbm_mcp_get_string_arg(args, "label");
+    const char *label = (label_arg && label_arg[0]) ? label_arg : "Class";
+
+    if (!from_v || !to_v) {
+        free(project); free(from_v); free(to_v); free(label_arg);
+        return cbm_mcp_text_result("from_version and to_version are required", true);
+    }
+
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store) {
+        char *err = build_project_list_error("project not found or not indexed");
+        char *res = cbm_mcp_text_result(err, true);
+        free(err); free(project); free(from_v); free(to_v); free(label_arg);
+        return res;
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_str(doc, root, "from_version", from_v);
+    yyjson_mut_obj_add_str(doc, root, "to_version", to_v);
+    yyjson_mut_obj_add_str(doc, root, "label", label);
+
+    yyjson_mut_val *changes = yyjson_mut_arr(doc);
+    yyjson_mut_obj_add_val(doc, root, "changes", changes);
+
+    int added   = run_diff_query(store, project, from_v, to_v, label, doc, changes, "added");
+    int removed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "removed");
+    int changed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "changed");
+
+    yyjson_mut_obj_add_int(doc, root, "added_count", added);
+    yyjson_mut_obj_add_int(doc, root, "removed_count", removed);
+    yyjson_mut_obj_add_int(doc, root, "changed_count", changed);
+
+    char *json = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    free(project); free(from_v); free(to_v); free(label_arg);
+    if (!json) return cbm_mcp_text_result("serialization failed", true);
+    char *res = cbm_mcp_text_result(json, false);
+    free(json);
+    return res;
+}
+
 static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *base_branch = cbm_mcp_get_string_arg(args, "base_branch");
@@ -4257,6 +4362,9 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     }
     if (strcmp(tool_name, "search_code") == 0) {
         return handle_search_code(srv, args_json);
+    }
+    if (strcmp(tool_name, "diff_versions") == 0) {
+        return handle_diff_versions(srv, args_json);
     }
     if (strcmp(tool_name, "detect_changes") == 0) {
         return handle_detect_changes(srv, args_json);
