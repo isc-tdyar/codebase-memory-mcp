@@ -94,7 +94,9 @@ static char *extract_body_ident_tokens(CBMExtractCtx *ctx, TSNode body) {
         if (nc == 0) {
             const char *k = ts_node_type(nd);
             if (strcmp(k, "identifier") == 0 || strcmp(k, "field_identifier") == 0 ||
-                strcmp(k, "property_identifier") == 0) {
+                strcmp(k, "property_identifier") == 0 ||
+                strcmp(k, "objectscript_identifier") == 0 ||
+                strcmp(k, "identifier_segment_immediate") == 0) {
                 uint32_t s = ts_node_start_byte(nd);
                 int len = (int)(ts_node_end_byte(nd) - s);
                 if (len > 0 && len < CBM_SZ_64 && s < (uint32_t)ctx->source_len) {
@@ -3568,6 +3570,29 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
                                     if (!first) {
                                         mdef.docstring = cbm_arena_strdup(a, props);
                                     }
+                                }
+                            }
+                        }
+
+                        if (strcmp(member_label, "Trigger") == 0) {
+                            TSNode tbody = cbm_find_child_by_kind(child, "core_trigger");
+                            if (ts_node_is_null(tbody))
+                                tbody = cbm_find_child_by_kind(child, "external_trigger");
+                            if (!ts_node_is_null(tbody)) {
+                                mdef.body_tokens = extract_body_ident_tokens(ctx, tbody);
+                                char *raw = cbm_node_text(a, tbody, ctx->source);
+                                if (raw && raw[0]) {
+                                    char esc[CBM_SZ_512]; int ei = 0;
+                                    for (int _ci = 0; raw[_ci] && ei < (int)sizeof(esc) - 3; _ci++) {
+                                        if (raw[_ci] == '"' || raw[_ci] == '\\') esc[ei++] = '\\';
+                                        else if (raw[_ci] == '\n') { esc[ei++] = '\\'; esc[ei++] = 'n'; continue; }
+                                        else if (raw[_ci] == '\r') continue;
+                                        esc[ei++] = raw[_ci];
+                                    }
+                                    esc[ei] = '\0';
+                                    char props[CBM_SZ_512];
+                                    snprintf(props, sizeof(props), "{\"trigger_body\":\"%s\"}", esc);
+                                    mdef.docstring = cbm_arena_strdup(a, props);
                                 }
                             }
                         }

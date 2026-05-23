@@ -62,17 +62,13 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-<<<<<<< HEAD
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
     return r;
 }
 
 static CBMFileResult *extract_with_macros(const char *src, CBMLanguage lang, const char *proj,
                                           const char *path, const CBMMacroTable *mt) {
     CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, mt, NULL);
-=======
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
->>>>>>> fork/014-parallel-mode-wiring
     return r;
 }
 
@@ -1726,6 +1722,61 @@ TEST(objectscript_udl_trigger_member) {
     PASS();
 }
 
+TEST(objectscript_udl_trigger_body_quit) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "Trigger OnDeleteSQL [ Event = DELETE, Time = AFTER ] {\n"
+        "    Quit\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "OnDeleteSQL"));
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].label, "Trigger") == 0 &&
+            strcmp(r->defs.items[i].name, "OnDeleteSQL") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].docstring);
+            ASSERT(strstr(r->defs.items[i].docstring, "trigger_body") != NULL);
+            ASSERT(strstr(r->defs.items[i].docstring, "Quit") != NULL);
+            break;
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_trigger_body_tokens) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Order Extends %Persistent\n"
+        "{\n"
+        "Trigger AfterInsert [ Event = INSERT, Time = AFTER ] {\n"
+        "    Set id = ..%Id()\n"
+        "    Do ##class(MyApp.Audit).Log(id)\n"
+        "    Quit\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Order.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "AfterInsert"));
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].label, "Trigger") == 0 &&
+            strcmp(r->defs.items[i].name, "AfterInsert") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].docstring);
+            ASSERT(strstr(r->defs.items[i].docstring, "trigger_body") != NULL);
+            ASSERT_NOT_NULL(r->defs.items[i].body_tokens);
+            ASSERT(strstr(r->defs.items[i].body_tokens, "Log") != NULL ||
+                   strstr(r->defs.items[i].body_tokens, "Audit") != NULL ||
+                   strstr(r->defs.items[i].body_tokens, "id") != NULL);
+            break;
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
 TEST(objectscript_udl_calls_typed_new) {
     CBMFileResult *r = extract(
         "Class MyApp.Caller Extends %RegisteredObject\n"
@@ -1802,6 +1853,11 @@ TEST(objectscript_macro_expand_system) {
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT(has_call(r, "%SYSTEM.Status.IsError"));
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  * Group H3: ObjectScript DATA_FLOWS argument extraction
  * ═══════════════════════════════════════════════════════════════════ */
 
@@ -1897,6 +1953,9 @@ TEST(objectscript_macro_constant_no_extra_call) {
     ASSERT(!has_call(r, "$$$MyConst"));
     cbm_free_result(r);
     cbm_arena_destroy(&arena);
+    PASS();
+}
+
 TEST(objectscript_data_flows_instance_method_args) {
     CBMFileResult *r = extract(
         "Class MyApp.Service Extends %RegisteredObject\n"
@@ -3004,7 +3063,10 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_index_member);
     RUN_TEST(objectscript_udl_xdata_member);
     RUN_TEST(objectscript_udl_trigger_member);
+    RUN_TEST(objectscript_udl_trigger_body_quit);
+    RUN_TEST(objectscript_udl_trigger_body_tokens);
     RUN_TEST(objectscript_udl_calls_typed_new);
+    RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
     RUN_TEST(objectscript_macro_expand_system);
     RUN_TEST(objectscript_macro_expand_local);
