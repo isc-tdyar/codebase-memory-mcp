@@ -1796,6 +1796,68 @@ TEST(objectscript_udl_calls_typed_new) {
     PASS();
 }
 
+TEST(objectscript_udl_ensemble_production_def_parses_items) {
+    CBMFileResult *r = extract(
+        "Class Sample.Production Extends Ens.Production\n"
+        "{\n"
+        "XData ProductionDefinition\n"
+        "{\n"
+        "<Production Name=\"Sample.Production\">\n"
+        "  <Item Name=\"MyService\" ClassName=\"Sample.Service\" Enabled=\"true\">\n"
+        "  </Item>\n"
+        "  <Item Name=\"MyOperation\" ClassName=\"Sample.Operation\" Enabled=\"false\">\n"
+        "  </Item>\n"
+        "</Production>\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Production.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_ensemble_production_def_hs_settings) {
+    CBMFileResult *r = extract(
+        "Class HS.Flash.Production Extends Ens.Production\n"
+        "{\n"
+        "XData ProductionDefinition\n"
+        "{\n"
+        "<Production Name=\"HS.Flash.Production\">\n"
+        "  <Item Name=\"FHIRService\" ClassName=\"HS.Flash.FHIRService\" Enabled=\"true\">\n"
+        "    <Setting Target=\"Host\" Name=\"TargetConfigName\">FHIROps</Setting>\n"
+        "    <Setting Target=\"Host\" Name=\"PatientHost\">PatientOps</Setting>\n"
+        "    <Setting Target=\"Host\" Name=\"ConformanceOperation\">ConformOps</Setting>\n"
+        "  </Item>\n"
+        "</Production>\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "HSProduction.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_ensemble_production_def_absent_no_error) {
+    CBMFileResult *r = extract(
+        "Class Sample.NonProduction Extends %Persistent\n"
+        "{\n"
+        "Method DoSomething() As %Status\n"
+        "{\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "NonProduction.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(!has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
 TEST(objectscript_udl_calls_typed_param) {
     CBMFileResult *r = extract(
         "Class MyApp.Handler Extends %RegisteredObject\n"
@@ -3065,6 +3127,9 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_trigger_member);
     RUN_TEST(objectscript_udl_trigger_body_quit);
     RUN_TEST(objectscript_udl_trigger_body_tokens);
+    RUN_TEST(objectscript_udl_ensemble_production_def_parses_items);
+    RUN_TEST(objectscript_udl_ensemble_production_def_hs_settings);
+    RUN_TEST(objectscript_udl_ensemble_production_def_absent_no_error);
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
