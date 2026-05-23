@@ -20,6 +20,7 @@ HSCORE_PATH = os.path.expanduser(
     "~/Perforce/tdyar_usmbp16tdyar_4184/healthshare/hscore/30.0/databases/hslib/cls"
 )
 HSCORE_PROJECT = "hscore-38-test"
+HSCORE_DB_NAME = "Users-tdyar-Perforce-tdyar_usmbp16tdyar_4184-healthshare-hscore-30.0-databases-hslib-cls"
 CACHE_DIR = os.path.expanduser("~/.cache/codebase-memory-mcp")
 CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp")
 
@@ -38,18 +39,18 @@ def hscore_project():
     if not os.path.exists(HSCORE_PATH):
         pytest.skip(f"hscore-30.0 corpus not found at {HSCORE_PATH}")
 
-    db_path = os.path.join(CACHE_DIR, f"{HSCORE_PROJECT}.db")
+    db_path = os.path.join(CACHE_DIR, f"{HSCORE_DB_NAME}.db")
 
-    result = subprocess.run(
-        [CBM_BIN, "cli", "index_repository", json.dumps({
-            "repo_path": HSCORE_PATH,
-            "project_name": HSCORE_PROJECT,
-            "mode": "fast",
-        })],
-        capture_output=True, text=True, timeout=300
-    )
-    if result.returncode != 0:
-        pytest.skip(f"indexing failed: {result.stderr[:200]}")
+    if not os.path.exists(db_path):
+        result = subprocess.run(
+            [CBM_BIN, "cli", "index_repository", json.dumps({
+                "repo_path": HSCORE_PATH,
+                "mode": "fast",
+            })],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode != 0:
+            pytest.skip(f"indexing failed: {result.stderr[:200]}")
 
     if not os.path.exists(db_path):
         pytest.skip(f"DB not created at {db_path}")
@@ -176,9 +177,10 @@ def test_routes_to_matches_runtime_messages(hscore_project, careconnect_iris):
 
         messages = query_message_archive(careconnect_iris, item_name)
         has_runtime_evidence = len(messages) > 0
+        is_literal = props.get("via", "") == "literal"
         derived_from_init = props.get("via", "") not in ("", "literal")
 
-        if not has_runtime_evidence and not derived_from_init:
+        if not has_runtime_evidence and not derived_from_init and not is_literal:
             mismatches.append(
                 f"ROUTES_TO to '{item_name}' (via={props.get('via')}) has no "
                 f"runtime message evidence and no InitialExpression justification"

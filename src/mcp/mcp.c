@@ -372,7 +372,8 @@ static const tool_def_t TOOLS[] = {
 
     {"trace_path",
      "Trace paths through the code graph. Modes: calls (callers/callees), data_flow (value "
-     "propagation with args at each hop), cross_service (through HTTP/async Route nodes). "
+     "propagation with args at each hop), cross_service (through HTTP/async Route nodes "
+     "and Ensemble ROUTES_TO edges). "
      "Use INSTEAD OF grep for callers, dependencies, impact analysis, or data flow tracing.",
      "{\"type\":\"object\",\"properties\":{\"function_name\":{\"type\":\"string\"},\"project\":{"
      "\"type\":\"string\"},\"direction\":{\"type\":\"string\",\"enum\":[\"inbound\",\"outbound\","
@@ -2144,7 +2145,7 @@ static yyjson_doc *resolve_trace_edge_types(const char *args, const char *mode,
                                             const char **out_types, int *out_count) {
     static const char *mode_calls[] = {"CALLS"};
     static const char *mode_data_flow[] = {"CALLS", "DATA_FLOWS"};
-    static const char *mode_cross_svc[] = {"HTTP_CALLS", "ASYNC_CALLS", "DATA_FLOWS", "CALLS"};
+    static const char *mode_cross_svc[] = {"HTTP_CALLS", "ASYNC_CALLS", "DATA_FLOWS", "CALLS", "ROUTES_TO"};
 
     *out_count = 0;
 
