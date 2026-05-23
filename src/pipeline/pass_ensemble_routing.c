@@ -376,18 +376,124 @@ static void resolve_method_routes(cbm_pipeline_ctx_t *ctx,
     }
 }
 
+#define CONF_WORKMGR   0.90
+
+/* Scan source for WorkMgr parallel dispatch: .Queue("##class(X).method", ...)
+ * Pattern: any receiver .Queue() call where first arg is "##class(Cls).Meth" */
+static void scan_workmgr_dispatch(cbm_pipeline_ctx_t *ctx,
+                                   const cbm_gbuf_node_t *method,
+                                   const char *source) {
+    if (!source) return;
+    const char *p = source;
+    const char *needle = ".Queue(\"##class(";
+    while ((p = strstr(p, needle)) != NULL) {
+        p += strlen(needle);
+        /* Extract class name up to ')' */
+        const char *cls_end = strchr(p, ')');
+        if (!cls_end) continue;
+        int cls_len = (int)(cls_end - p);
+        if (cls_len <= 0 || cls_len >= CBM_SZ_256) { p = cls_end; continue; }
+        char cls_name[CBM_SZ_256];
+        memcpy(cls_name, p, (size_t)cls_len);
+        cls_name[cls_len] = '\0';
+
+        /* Expect '.' after ')' then method name up to '"' */
+        const char *dot = cls_end + 1;
+        if (*dot != '.') { p = dot; continue; }
+        const char *meth_start = dot + 1;
+        const char *meth_end = strchr(meth_start, '"');
+        if (!meth_end) continue;
+        int meth_len = (int)(meth_end - meth_start);
+        if (meth_len <= 0 || meth_len >= CBM_SZ_256) { p = meth_end; continue; }
+        char meth_name[CBM_SZ_256];
+        memcpy(meth_name, meth_start, (size_t)meth_len);
+        meth_name[meth_len] = '\0';
+
+        /* Find the target method in the gbuf by name within cls_name */
+        char target_qn_suffix[CBM_SZ_512];
+        snprintf(target_qn_suffix, sizeof(target_qn_suffix), "%s.%s", cls_name, meth_name);
+
+        const cbm_gbuf_node_t **candidates = NULL;
+        int ccount = 0;
+        cbm_gbuf_find_by_name(ctx->gbuf, meth_name,
+                              (const cbm_gbuf_node_t ***)&candidates, &ccount);
+        for (int ci = 0; ci < ccount; ci++) {
+            if (candidates[ci]->qualified_name &&
+                strstr(candidates[ci]->qualified_name, target_qn_suffix)) {
+                char props[CBM_SZ_256];
+                snprintf(props, sizeof(props),
+                         "{\"via\":\"WorkMgr.Queue\",\"confidence\":%.2f}", CONF_WORKMGR);
+                cbm_gbuf_insert_edge(ctx->gbuf, method->id, candidates[ci]->id,
+                                     "CALLS", props);
+                break;
+            }
+        }
+        p = meth_end;
+    }
+}
+
 void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx) {
     if (!ctx || !ctx->gbuf || !ctx->repo_path) return;
-
-    ens_prod_def_t **defs = NULL;
-    int n_defs = 0;
-    collect_prod_defs(ctx, &defs, &n_defs);
-    if (n_defs == 0) return;
 
     const cbm_gbuf_node_t **method_nodes = NULL;
     int method_count = 0;
     cbm_gbuf_find_by_label(ctx->gbuf, "Method",
                            (const cbm_gbuf_node_t ***)&method_nodes, &method_count);
+
+    /* Pass A: WorkMgr parallel dispatch — CALLS edges, independent of productions */
+    int workmgr_edges = 0;
+    char last_path[CBM_SZ_1K] = {0};
+    char *last_source = NULL;
+    for (int mi = 0; mi < method_count; mi++) {
+        const cbm_gbuf_node_t *m = method_nodes[mi];
+        if (!m->file_path) continue;
+        char full_path[CBM_SZ_1K];
+        snprintf(full_path, sizeof(full_path), "%s/%s", ctx->repo_path, m->file_path);
+        if (strcmp(full_path, last_path) != 0) {
+            free(last_source);
+            last_source = read_file(full_path);
+            snprintf(last_path, sizeof(last_path), "%s", full_path);
+        }
+        if (!last_source || !strstr(last_source, ".Queue(\"##class(")) continue;
+        /* Scope scan to this method's line range to avoid cross-method false positives */
+        char *method_slice = NULL;
+        if (m->start_line > 0 && m->end_line >= m->start_line) {
+            const char *p = last_source;
+            int line = 1;
+            const char *method_start = NULL, *method_end = NULL;
+            while (*p) {
+                if (line == m->start_line) method_start = p;
+                if (line == m->end_line + 1) { method_end = p; break; }
+                if (*p == '\n') line++;
+                p++;
+            }
+            if (!method_end) method_end = p;
+            if (method_start && method_end > method_start) {
+                int slen = (int)(method_end - method_start);
+                method_slice = malloc((size_t)slen + 1);
+                if (method_slice) {
+                    memcpy(method_slice, method_start, (size_t)slen);
+                    method_slice[slen] = '\0';
+                }
+            }
+        }
+        const char *scan_src = method_slice ? method_slice : last_source;
+        int before_w = cbm_gbuf_edge_count_by_type(ctx->gbuf, "CALLS");
+        scan_workmgr_dispatch(ctx, m, scan_src);
+        free(method_slice);
+        workmgr_edges += cbm_gbuf_edge_count_by_type(ctx->gbuf, "CALLS") - before_w;
+    }
+    free(last_source);
+    if (workmgr_edges > 0) {
+        char wbuf[32]; snprintf(wbuf, sizeof(wbuf), "%d", workmgr_edges);
+        cbm_log_info("ensemble_routing.workmgr", "edges", wbuf);
+    }
+
+    /* Pass B: Ensemble production routing — ROUTES_TO edges */
+    ens_prod_def_t **defs = NULL;
+    int n_defs = 0;
+    collect_prod_defs(ctx, &defs, &n_defs);
+    if (n_defs == 0) return;
 
     int before = cbm_gbuf_edge_count_by_type(ctx->gbuf, "ROUTES_TO");
 
