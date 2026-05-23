@@ -789,6 +789,27 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
                                                        &state->os_type_map);
         }
 
+        if (!callee &&
+            (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+             ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
+            strcmp(ts_node_type(node), "relative_dot_method") == 0 &&
+            state->enclosing_class_qn && state->enclosing_class_qn[0]) {
+            TSNode oref = cbm_find_child_by_kind(node, "oref_method");
+            if (!ts_node_is_null(oref)) {
+                TSNode mname_node = cbm_find_child_by_kind(oref, "method_name");
+                if (!ts_node_is_null(mname_node)) {
+                    TSNode ident = ts_node_named_child_count(mname_node) > 0
+                                   ? ts_node_named_child(mname_node, 0) : (TSNode){0};
+                    if (!ts_node_is_null(ident)) {
+                        char *mname = cbm_node_text(ctx->arena, ident, ctx->source);
+                        if (mname && mname[0])
+                            callee = cbm_arena_sprintf(ctx->arena, "%s.%s",
+                                                       state->enclosing_class_qn, mname);
+                    }
+                }
+            }
+        }
+
         if (callee && callee[0] == '$' && callee[1] == '$' && callee[2] == '$' &&
             ctx->macro_table) {
             const char *macro_name = callee + 3;

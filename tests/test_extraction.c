@@ -1777,6 +1777,29 @@ TEST(objectscript_udl_trigger_body_tokens) {
     PASS();
 }
 
+TEST(objectscript_udl_self_call_relative_dot_method) {
+    CBMFileResult *r = extract(
+        "Class HS.Flash.UpdateManager Extends Ens.BusinessProcess\n"
+        "{\n"
+        "Method MakeMRNUpToDate(pRequest As HS.Message.FlashQueueUpdate) As %Status\n"
+        "{\n"
+        "    Set tSC = ..processStreamlet(pSession, pTS, tMPIID, tSourceMRN, ii)\n"
+        "    Quit tSC\n"
+        "}\n"
+        "Method processStreamlet(pSession As %Integer) As %Status\n"
+        "{\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "UpdateManager.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Method", "MakeMRNUpToDate"));
+    ASSERT(has_call(r, "HS.Flash.UpdateManager.processStreamlet"));
+    cbm_free_result(r);
+    PASS();
+}
+
 TEST(objectscript_udl_calls_typed_new) {
     CBMFileResult *r = extract(
         "Class MyApp.Caller Extends %RegisteredObject\n"
@@ -3130,6 +3153,7 @@ SUITE(extraction) {
     RUN_TEST(objectscript_udl_ensemble_production_def_parses_items);
     RUN_TEST(objectscript_udl_ensemble_production_def_hs_settings);
     RUN_TEST(objectscript_udl_ensemble_production_def_absent_no_error);
+    RUN_TEST(objectscript_udl_self_call_relative_dot_method);
     RUN_TEST(objectscript_udl_calls_typed_new);
     RUN_TEST(objectscript_udl_calls_typed_param);
     RUN_TEST(objectscript_udl_calls_typed_property);
