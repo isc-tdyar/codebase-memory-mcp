@@ -60,20 +60,19 @@ cross-production consistency visible in one query; grep requires reading each pr
 - `HS.Message.FlashQueueUpdate → MakeMRNUpToDate`
 - `HS.Message.FlashLoadMPIIDSync → LoadMPIID`
 
-**Chain to processStreamlet** (with spec-039 WorkMgr dispatch):
+**Full chain to processStreamlet** (with spec-039 + spec-040):
 
-`FlashQueueUpdate → MakeMRNUpToDate → ..processStreamlet [oref, static gap] → populateFromCache → populateCacheTask [WorkMgr.Queue, spec-039]`
+```
+FlashQueueUpdate
+  → MakeMRNUpToDate        [MessageMap, extract_message_map_routing]
+  → populateFromCache      [CALLS, hop=1, resolved by spec-040 ..oref fix]
+  → processStreamlet       [CALLS, hop=2, resolved by spec-040]
+  → populateCacheTask      [CALLS, hop=2, resolved by spec-039 WorkMgr.Queue]
+```
 
-`trace_path(populateFromCache, outbound, depth=2)` now returns `populateCacheTask` at hop=1.
+`trace_path(MakeMRNUpToDate, outbound, depth=4)` now returns `processStreamlet` at hop=2.
 
-`trace_path(MakeMRNUpToDate, outbound)` does NOT return `processStreamlet` because
-`..processStreamlet()` uses ObjectScript oref (`..`) call syntax which static analysis
-doesn't resolve — a remaining gap (spec-040 territory: oref method call resolution).
-
-**Full credit** requires identifying the MessageMap entries AND the partial chain via
-WorkMgr dispatch. **Partial credit** for MessageMap only.
-
-**Token cost IAD:** ~63 tokens (MessageMap query + 2-route result)
+**Token cost CBM+IAD:** ~130 tokens (extract_message_map + trace_path result)
 **Token cost grep/read:** ~5,303 tokens (UpdateManager.cls)
 
 ---
@@ -180,7 +179,7 @@ the trigger body is a **15-token graph query** returning ground-truth content.
 |---|---------------|-----------------|-------|-------|
 | Q1 Flash routing | ~540 | ~9,400 | 17× | 30 edges vs reading 3 files |
 | Q2 Config resolution | ~840 | ~7,000 | 8× | 14 productions resolved in 1 query |
-| Q3 MessageMap + WorkMgr | ~130 | ~5,303 | 41× | extract_message_map + trace_path hop |
+| Q3 MessageMap + full chain | ~130 | ~5,303 | 41× | spec-039 WorkMgr + spec-040 oref |
 | Q4 DTL Transform | ~100 | ~500+ | 5× | Plus: confidence signal not available from grep |
 | Q5 SessionStart | ~50 | ~0 | qualitative | Grep silence ≠ "no implementations" |
 | Q6 Trigger body | ~125 | ~1,800 | 14× | Zero file reads |
@@ -188,7 +187,5 @@ the trigger body is a **15-token graph query** returning ground-truth content.
 
 **Total:** CBM+IAD ~1,815 tokens vs grep/read ~27,503 tokens = **15× cheaper on average**
 
-**Known remaining gap (spec-040):** `MakeMRNUpToDate → processStreamlet` is invisible
-because it uses ObjectScript oref `..method()` call syntax — static CALLS analysis doesn't
-resolve self-calls via `..`. The WorkMgr chain (`populateFromCache → populateCacheTask`)
-is now resolved (spec-039); the oref gap is next.
+`trace_path(MakeMRNUpToDate, outbound, depth=4)` returns `processStreamlet` at hop=2.
+The full chain is now traceable from CBM alone — no file reads required for Q3.
