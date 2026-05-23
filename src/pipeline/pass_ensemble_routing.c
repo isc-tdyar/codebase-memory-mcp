@@ -168,10 +168,18 @@ static const ens_item_t *find_item(const ens_prod_def_t *def, const char *name) 
 
 static int64_t find_entry_point(cbm_pipeline_ctx_t *ctx, const char *class_name) {
     for (int ei = 0; ENTRY_POINTS[ei]; ei++) {
-        char meth_qn[CBM_SZ_512];
-        snprintf(meth_qn, sizeof(meth_qn), "%s.%s", class_name, ENTRY_POINTS[ei]);
-        const cbm_gbuf_node_t *m = cbm_gbuf_find_by_qn(ctx->gbuf, meth_qn);
-        if (m) return m->id;
+        char suffix[CBM_SZ_512];
+        snprintf(suffix, sizeof(suffix), "%s.%s", class_name, ENTRY_POINTS[ei]);
+
+        const cbm_gbuf_node_t **nodes = NULL;
+        int count = 0;
+        cbm_gbuf_find_by_name(ctx->gbuf, ENTRY_POINTS[ei],
+                              (const cbm_gbuf_node_t ***)&nodes, &count);
+        for (int ni = 0; ni < count; ni++) {
+            if (nodes[ni]->qualified_name &&
+                strstr(nodes[ni]->qualified_name, suffix))
+                return nodes[ni]->id;
+        }
     }
     return 0;
 }
@@ -263,15 +271,13 @@ static void scan_initial_expression(const char *source, const char *prop_name,
 }
 
 static void collect_prod_defs(cbm_pipeline_ctx_t *ctx,
-                               ens_prod_def_t ***defs_out, int *count_out,
-                               char ***sources_out, int *sources_count_out) {
+                               ens_prod_def_t ***defs_out, int *count_out) {
     const cbm_gbuf_node_t **xdata_nodes = NULL;
     int xdata_count = 0;
     cbm_gbuf_find_by_label(ctx->gbuf, "XData",
                            (const cbm_gbuf_node_t ***)&xdata_nodes, &xdata_count);
 
     ens_prod_def_t **defs = NULL;
-    char **sources = NULL;
     int n = 0;
 
     for (int xi = 0; xi < xdata_count; xi++) {
@@ -304,12 +310,12 @@ static void collect_prod_defs(cbm_pipeline_ctx_t *ctx,
         if (!xml_start) { free(source); continue; }
 
         ens_prod_def_t *def = parse_production_xml(xml_start, class_qn, xd->file_path);
-        if (!def) { free(source); continue; }
+        free(source);
+        if (!def) continue;
 
         char n_items_buf[32];
         snprintf(n_items_buf, sizeof(n_items_buf), "%d", def->n_items);
-        cbm_log_info("ensemble_routing.parse", "class", class_qn,
-                     "items", n_items_buf);
+        cbm_log_info("ensemble_routing.parse", "class", class_qn, "items", n_items_buf);
 
         for (int i = 0; i < def->n_items; i++) {
             ens_item_t *item = &def->items[i];
@@ -324,35 +330,34 @@ static void collect_prod_defs(cbm_pipeline_ctx_t *ctx,
         }
 
         ens_prod_def_t **tmp = realloc(defs, (size_t)(n + 1) * sizeof(ens_prod_def_t *));
-        char **stmp = realloc(sources, (size_t)(n + 1) * sizeof(char *));
-        if (!tmp || !stmp) { free(def); free(source); if (tmp) defs = tmp; if (stmp) sources = stmp; continue; }
+        if (!tmp) { free(def); continue; }
         defs = tmp;
-        sources = stmp;
-        defs[n] = def;
-        sources[n] = source;
-        n++;
+        defs[n++] = def;
     }
     *defs_out = defs;
     *count_out = n;
-    *sources_out = sources;
-    *sources_count_out = n;
+}
+
+static bool method_belongs_to_production(const cbm_gbuf_node_t *method,
+                                          const ens_prod_def_t *def) {
+    if (!method->properties_json) return false;
+    char parent_class[CBM_SZ_512];
+    if (!jstr(method->properties_json, "parent_class", parent_class, sizeof(parent_class)))
+        return false;
+    for (int i = 0; i < def->n_items; i++) {
+        if (strstr(parent_class, def->items[i].class_name))
+            return true;
+    }
+    return false;
 }
 
 static void resolve_method_routes(cbm_pipeline_ctx_t *ctx,
                                    const cbm_gbuf_node_t *method,
                                    const char *source,
                                    const ens_prod_def_t *def) {
-    char bt[CBM_SZ_512];
-    if (!jstr(method->properties_json, "bt", bt, sizeof(bt))) return;
-    if (!strstr(bt, "SendRequestSync")) return;
-
-    char parent_class[CBM_SZ_512];
-    if (!jstr(method->properties_json, "parent_class", parent_class, sizeof(parent_class)))
-        return;
-
-    if (strcmp(parent_class, def->production_class) != 0 &&
-        strncmp(parent_class, def->production_class, strlen(def->production_class)) != 0)
-        return;
+    if (!method->properties_json) return;
+    if (!method_belongs_to_production(method, def)) return;
+    if (!strstr(source, "SendRequestSync")) return;
 
     char literal[CBM_SZ_256], prop_name[CBM_SZ_256];
     scan_source_for_send_targets(source, method->name, literal, sizeof(literal),
@@ -375,9 +380,8 @@ void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx) {
     if (!ctx || !ctx->gbuf || !ctx->repo_path) return;
 
     ens_prod_def_t **defs = NULL;
-    char **sources = NULL;
-    int n_defs = 0, n_sources = 0;
-    collect_prod_defs(ctx, &defs, &n_defs, &sources, &n_sources);
+    int n_defs = 0;
+    collect_prod_defs(ctx, &defs, &n_defs);
     if (n_defs == 0) return;
 
     const cbm_gbuf_node_t **method_nodes = NULL;
@@ -389,12 +393,19 @@ void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx) {
 
     for (int di = 0; di < n_defs; di++) {
         ens_prod_def_t *def = defs[di];
-        const char *source = sources[di];
 
         for (int mi = 0; mi < method_count; mi++) {
             const cbm_gbuf_node_t *m = method_nodes[mi];
-            if (!m->properties_json) continue;
-            resolve_method_routes(ctx, m, source, def);
+            if (!m->properties_json || !m->file_path) continue;
+            if (!method_belongs_to_production(m, def)) continue;
+
+            char meth_full_path[CBM_SZ_1K];
+            snprintf(meth_full_path, sizeof(meth_full_path), "%s/%s",
+                     ctx->repo_path, m->file_path);
+            char *meth_source = read_file(meth_full_path);
+            if (!meth_source) continue;
+            resolve_method_routes(ctx, m, meth_source, def);
+            free(meth_source);
         }
 
         for (int ii = 0; ii < def->n_items; ii++) {
@@ -414,10 +425,8 @@ void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx) {
         }
 
         free(defs[di]);
-        free(sources[di]);
     }
     free(defs);
-    free(sources);
 
     int routes = cbm_gbuf_edge_count_by_type(ctx->gbuf, "ROUTES_TO") - before;
     char n_defs_buf[32], n_routes_buf[32];
