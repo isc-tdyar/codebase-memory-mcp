@@ -9,7 +9,6 @@
 #include "cbm.h"
 #include "macro_table.h"
 
-
 /* ── Helpers ───────────────────────────────────────────────────── */
 
 /* Check if any definition with the given label has the given name. */
@@ -2111,76 +2110,6 @@ TEST(objectscript_data_flows_instance_method_args) {
     "</Method>\n" \
     "</Class>\n" \
     "</Export>\n"
-
-
-#define CLASSMETHOD_EXPORT \
-    "<?xml version=\"1.0\"?>\n" \
-    "<Export generator=\"Cache\" version=\"25\">\n" \
-    "<Class name=\"Test.CM\">\n" \
-    "<Method name=\"Run\">\n" \
-    "<ClassMethod>1</ClassMethod>\n" \
-    "<FormalSpec>pArg:%String,pFlag:%Boolean=0</FormalSpec>\n" \
-    "<ReturnType>%Status</ReturnType>\n" \
-    "<Implementation><![CDATA[\n" \
-    "\tQuit $$$OK\n" \
-    "]]></Implementation>\n" \
-    "</Method>\n" \
-    "</Class>\n" \
-    "</Export>\n"
-
-
-#define MEMBER_EXPORT \
-    "<?xml version=\"1.0\"?>\n" \
-    "<Export generator=\"Cache\" version=\"25\">\n" \
-    "<Class name=\"Test.Members\">\n" \
-    "<Property name=\"Name\">\n" \
-    "<Type>%String</Type>\n" \
-    "<Parameter name=\"MAXLEN\" value=\"200\"/>\n" \
-    "</Property>\n" \
-    "<Parameter name=\"VERSION\">\n" \
-    "<Default>1</Default>\n" \
-    "</Parameter>\n" \
-    "<Index name=\"NameIdx\">\n" \
-    "<Properties>Name</Properties>\n" \
-    "<Unique>1</Unique>\n" \
-    "</Index>\n" \
-    "</Class>\n" \
-    "</Export>\n"
-
-
-#define CALLS_EXPORT \
-    "<?xml version=\"1.0\"?>\n" \
-    "<Export generator=\"Cache\" version=\"25\">\n" \
-    "<Class name=\"Test.Caller\">\n" \
-    "<Super>%RegisteredObject</Super>\n" \
-    "<Method name=\"Run\">\n" \
-    "<ClassMethod>1</ClassMethod>\n" \
-    "<ReturnType>%Status</ReturnType>\n" \
-    "<Implementation><![CDATA[\n" \
-    "\tSet obj = ##class(Target.Worker).%New()\n" \
-    "\tDo obj.Execute()\n" \
-    "\tQuit $$$OK\n" \
-    "]]></Implementation>\n" \
-    "</Method>\n" \
-    "</Class>\n" \
-    "</Export>\n"
-
-
-#define MULTI_EXPORT \
-    "<?xml version=\"1.0\"?>\n" \
-    "<Export generator=\"Cache\" version=\"25\">\n" \
-    "<Class name=\"Test.First\">\n" \
-    "<Method name=\"One\"><Implementation><![CDATA[\tQuit 1\n]]></Implementation></Method>\n" \
-    "</Class>\n" \
-    "<Class name=\"Test.Second\">\n" \
-    "<Method name=\"Two\"><Implementation><![CDATA[\tQuit 2\n]]></Implementation></Method>\n" \
-    "</Class>\n" \
-    "</Export>\n"
-
-
-/* ===================================================================
- * Group I: cbm_test.go ports
- * =================================================================== */
 
 TEST(python_docstring) {
     CBMFileResult *r = extract(

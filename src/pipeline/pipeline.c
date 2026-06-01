@@ -18,6 +18,7 @@ enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 6, P
 #include "pipeline/artifact.h"
 #include "pipeline/pipeline_internal.h"
 #include "pipeline/pass_lsp_cross.h"
+#include "pipeline/pass_ensemble_routing.h"
 #include "pipeline/worker_pool.h"
 #include "graph_buffer/graph_buffer.h"
 #include "store/store.h"
@@ -483,18 +484,24 @@ static void predump_sem(cbm_pipeline_ctx_t *ctx) {
 static void predump_cfg(cbm_pipeline_ctx_t *ctx) {
     cbm_pipeline_pass_configlink(ctx);
 }
+static void predump_ensemble(cbm_pipeline_ctx_t *ctx) {
+    cbm_pipeline_pass_ensemble_routing(ctx);
+}
 
 static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
     static const struct {
         predump_pass_fn fn;
         const char *name;
-        bool moderate_only; /* true = skip in fast mode */
+        bool moderate_only;
     } passes[] = {
-        {predump_deco, "decorator_tags", false}, {predump_cfg, "configlink", false},
-        {predump_route, "route_match", false},   {predump_sim, "similarity", true},
-        {predump_sem, "semantic_edges", true},
+        {predump_deco,     "decorator_tags",      false},
+        {predump_cfg,      "configlink",          false},
+        {predump_ensemble, "ensemble_routing",    false},
+        {predump_route,    "route_match",         false},
+        {predump_sim,      "similarity",          true},
+        {predump_sem,      "semantic_edges",      true},
     };
-    enum { PREDUMP_PASS_COUNT = 5 };
+    enum { PREDUMP_PASS_COUNT = 6 };
     struct timespec t;
     for (int i = 0; i < PREDUMP_PASS_COUNT && !check_cancel(p); i++) {
         /* "moderate_only" passes (similarity/semantic edges) run in FULL,

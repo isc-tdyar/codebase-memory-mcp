@@ -440,6 +440,8 @@ int cbm_pipeline_pass_decorator_tags(cbm_gbuf_t *gbuf, const char *project);
 
  int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
 
+void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx);
+
 bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz,
                                  char *method, size_t meth_sz);
 
