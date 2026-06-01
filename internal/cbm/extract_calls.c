@@ -413,6 +413,23 @@ static const char *extract_first_string_arg(CBMExtractCtx *ctx, TSNode args) {
     return NULL;
 }
 
+static const char *extract_nth_string_arg(CBMExtractCtx *ctx, TSNode args, uint32_t n) {
+    uint32_t nc = ts_node_named_child_count(args);
+    uint32_t found = 0;
+    for (uint32_t ai = 0; ai < nc && ai < MAX_POSITIONAL_SCAN + n; ai++) {
+        TSNode arg = ts_node_named_child(args, ai);
+        const char *ak = ts_node_type(arg);
+        if (is_string_like(ak)) {
+            if (found == n) {
+                char *text = cbm_node_text(ctx->arena, arg, ctx->source);
+                return strip_and_validate_string_arg(ctx->arena, text);
+            }
+            found++;
+        }
+    }
+    return NULL;
+}
+
 // Walk AST for call nodes (iterative)
 static void walk_calls(CBMExtractCtx *ctx, TSNode root, const CBMLangSpec *spec) {
     TSNodeStack stack;
