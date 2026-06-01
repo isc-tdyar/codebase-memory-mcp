@@ -707,9 +707,9 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
             if (ctx->language == CBM_LANG_PYTHON && !ts_node_is_null(args)) {
                 const char *cn = call.callee_name;
                 size_t len = cn ? strlen(cn) : 0;
-                static const char *iris_dispatch[] = {
-                    ".classMethodValue", ".classMethodVoid",
-                    ".classMethodBoolean", ".classMethodObject", NULL};
+                static const char *iris_dispatch[] = {".classMethodValue", ".classMethodVoid",
+                                                      ".classMethodBoolean", ".classMethodObject",
+                                                      NULL};
                 for (const char **nm = iris_dispatch; *nm; nm++) {
                     size_t nlen = strlen(*nm);
                     if (len >= nlen && strcmp(cn + len - nlen, *nm) == 0) {
