@@ -1195,14 +1195,16 @@ static const char **extract_base_classes(CBMArena *a, TSNode node, const char *s
                 TSNode ch = ts_node_named_child(ext, i);
                 if (strcmp(ts_node_type(ch), "class_name") == 0) {
                     char *base = cbm_node_text(a, ch, source);
-                    if (base && base[0]) bases[base_count++] = base;
+                    if (base && base[0])
+                        bases[base_count++] = base;
                 }
             }
             if (base_count > 0) {
                 const char **result =
                     (const char **)cbm_arena_alloc(a, (base_count + 1) * sizeof(const char *));
                 if (result) {
-                    for (int i = 0; i < base_count; i++) result[i] = bases[i];
+                    for (int i = 0; i < base_count; i++)
+                        result[i] = bases[i];
                     result[base_count] = NULL;
                     return result;
                 }
@@ -1227,8 +1229,7 @@ static const char **extract_base_classes(CBMArena *a, TSNode node, const char *s
     for (const char **f = fields; *f; f++) {
         TSNode super = ts_node_child_by_field_name(node, *f, (uint32_t)strlen(*f));
         if (!ts_node_is_null(super)) {
-            base_count += collect_bases_from_field(a, super, source,
-                                                   bases + base_count,
+            base_count += collect_bases_from_field(a, super, source, bases + base_count,
                                                    MAX_BASES_MINUS_1 - base_count);
         }
     }
@@ -2206,19 +2207,19 @@ static TSNode resolve_method_name(TSNode child, CBMLanguage lang) {
         return cbm_find_child_by_kind(child, "simple_identifier");
     }
 
-        if (lang == CBM_LANG_OBJECTSCRIPT_UDL &&
-            (strcmp(ck, "method") == 0 || strcmp(ck, "classmethod") == 0)) {
-            TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
-            if (!ts_node_is_null(mdef)) {
-                TSNode mname = cbm_find_child_by_kind(mdef, "method_name");
-                if (!ts_node_is_null(mname) && ts_node_named_child_count(mname) > 0) {
-                    return ts_node_named_child(mname, 0);
-                }
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL &&
+        (strcmp(ck, "method") == 0 || strcmp(ck, "classmethod") == 0)) {
+        TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
+        if (!ts_node_is_null(mdef)) {
+            TSNode mname = cbm_find_child_by_kind(mdef, "method_name");
+            if (!ts_node_is_null(mname) && ts_node_named_child_count(mname) > 0) {
+                return ts_node_named_child(mname, 0);
             }
         }
-        if (lang == CBM_LANG_OBJECTSCRIPT_UDL && strcmp(ck, "query") == 0) {
-            return cbm_find_child_by_kind(child, "query_name");
-        }
+    }
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL && strcmp(ck, "query") == 0) {
+        return cbm_find_child_by_kind(child, "query_name");
+    }
 
     if (strcmp(ck, "arrow_function") == 0) {
         return resolve_arrow_func_name(child);
@@ -2253,9 +2254,8 @@ static void push_method_def(CBMExtractCtx *ctx, TSNode child, const char *class_
     def.is_exported = cbm_is_exported(name, ctx->language);
 
     TSNode params = ts_node_child_by_field_name(child, TS_FIELD("parameters"));
-    if (ts_node_is_null(params) &&
-        (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
-         ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+    if (ts_node_is_null(params) && (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                                    ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
         params = ts_node_child_by_field_name(child, TS_FIELD("parameter_list"));
     }
     if (!ts_node_is_null(params)) {
@@ -2275,11 +2275,11 @@ static void push_method_def(CBMExtractCtx *ctx, TSNode child, const char *class_
         }
     }
 
-    if (!def.return_type &&
-        (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
-         ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+    if (!def.return_type && (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                             ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
         TSNode mdef = cbm_find_child_by_kind(child, "method_definition");
-        if (ts_node_is_null(mdef)) mdef = child;
+        if (ts_node_is_null(mdef))
+            mdef = child;
         TSNode rt_node = cbm_find_child_by_kind(mdef, "return_type");
         if (!ts_node_is_null(rt_node)) {
             TSNode tname = cbm_find_child_by_kind(rt_node, "typename");
@@ -3437,7 +3437,7 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
     }
 
     CBMArena *a = ctx->arena;
-     uint32_t count = ts_node_named_child_count(body);
+    uint32_t count = ts_node_named_child_count(body);
     for (uint32_t i = 0; i < count; i++) {
         TSNode child = ts_node_named_child(body, i);
         if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL &&
@@ -3483,13 +3483,24 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
         if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL) {
             const char *ntype = ts_node_type(child);
             const char *name_child_kind = NULL;
-            const char *member_label    = NULL;
+            const char *member_label = NULL;
 
-            if (strcmp(ntype, "index")     == 0) { name_child_kind = "index_name";   member_label = "Index";   }
-            else if (strcmp(ntype, "trigger")  == 0) { name_child_kind = "trigger_name"; member_label = "Trigger"; }
-            else if (strcmp(ntype, "xdata")    == 0) { name_child_kind = "xdata_name";   member_label = "XData";   }
-            else if (strcmp(ntype, "storage")  == 0) { name_child_kind = "storage_name"; member_label = "Storage"; }
-            else if (strcmp(ntype, "foreignkey") == 0) { name_child_kind = "foreignkey_name"; member_label = "Variable"; }
+            if (strcmp(ntype, "index") == 0) {
+                name_child_kind = "index_name";
+                member_label = "Index";
+            } else if (strcmp(ntype, "trigger") == 0) {
+                name_child_kind = "trigger_name";
+                member_label = "Trigger";
+            } else if (strcmp(ntype, "xdata") == 0) {
+                name_child_kind = "xdata_name";
+                member_label = "XData";
+            } else if (strcmp(ntype, "storage") == 0) {
+                name_child_kind = "storage_name";
+                member_label = "Storage";
+            } else if (strcmp(ntype, "foreignkey") == 0) {
+                name_child_kind = "foreignkey_name";
+                member_label = "Variable";
+            }
 
             if (name_child_kind) {
                 TSNode nname = cbm_find_child_by_kind(child, name_child_kind);
@@ -3503,60 +3514,71 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
                         mdef.label = member_label;
                         mdef.file_path = ctx->rel_path;
                         mdef.start_line = ts_node_start_point(child).row + TS_LINE_OFFSET;
-                        mdef.end_line   = ts_node_end_point(child).row  + TS_LINE_OFFSET;
+                        mdef.end_line = ts_node_end_point(child).row + TS_LINE_OFFSET;
 
                         if (strcmp(member_label, "Storage") == 0) {
-                            TSNode body = cbm_find_child_by_kind(child, "storage_body");
-                            if (!ts_node_is_null(body)) {
-                                char *xml = cbm_node_text(a, body, ctx->source);
+                            TSNode storage_body = cbm_find_child_by_kind(child, "storage_body");
+                            if (!ts_node_is_null(storage_body)) {
+                                char *xml = cbm_node_text(a, storage_body, ctx->source);
                                 if (xml) {
                                     char props[CBM_SZ_2K];
                                     int pos = snprintf(props, sizeof(props), "{");
-                                    static const struct { const char *tag; const char *key; } kv[] = {
-                                        {"ExtentSize",    "extent_size"},
-                                        {"DataLocation",  "data_global"},
-                                        {"IdLocation",    "id_global"},
-                                        {"IndexLocation", "index_global"},
-                                        {"StreamLocation","stream_global"},
-                                        {"Type",          "storage_type"},
-                                        {NULL, NULL}
-                                    };
+                                    static const struct {
+                                        const char *tag;
+                                        const char *key;
+                                    } kv[] = {{"ExtentSize", "extent_size"},
+                                              {"DataLocation", "data_global"},
+                                              {"IdLocation", "id_global"},
+                                              {"IndexLocation", "index_global"},
+                                              {"StreamLocation", "stream_global"},
+                                              {"Type", "storage_type"},
+                                              {NULL, NULL}};
                                     bool first = true;
                                     for (int ki = 0; kv[ki].tag; ki++) {
                                         char open[64], close[64], buf[256];
-                                        snprintf(open,  sizeof(open),  "<%s>",  kv[ki].tag);
+                                        snprintf(open, sizeof(open), "<%s>", kv[ki].tag);
                                         snprintf(close, sizeof(close), "</%s>", kv[ki].tag);
                                         const char *s = strstr(xml, open);
-                                        if (!s) continue;
+                                        if (!s)
+                                            continue;
                                         s += strlen(open);
                                         const char *e = strstr(s, close);
-                                        if (!e) continue;
+                                        if (!e)
+                                            continue;
                                         size_t vlen = (size_t)(e - s);
-                                        if (vlen >= sizeof(buf)) vlen = sizeof(buf)-1;
-                                        memcpy(buf, s, vlen); buf[vlen] = '\0';
-                                        char esc[300]; int ei = 0;
-                                        for (size_t ci = 0; ci < vlen && ei < (int)sizeof(esc)-2; ci++) {
-                                            if (buf[ci] == '"' || buf[ci] == '\\') esc[ei++] = '\\';
+                                        if (vlen >= sizeof(buf))
+                                            vlen = sizeof(buf) - 1;
+                                        memcpy(buf, s, vlen);
+                                        buf[vlen] = '\0';
+                                        char esc[300];
+                                        int ei = 0;
+                                        for (size_t ci = 0; ci < vlen && ei < (int)sizeof(esc) - 2;
+                                             ci++) {
+                                            if (buf[ci] == '"' || buf[ci] == '\\')
+                                                esc[ei++] = '\\';
                                             esc[ei++] = buf[ci];
                                         }
                                         esc[ei] = '\0';
-                                        pos += snprintf(props+pos, sizeof(props)-pos,
-                                            "%s\"%s\":\"%s\"",
-                                            first ? "" : ",", kv[ki].key, esc);
+                                        pos += snprintf(props + pos, sizeof(props) - pos,
+                                                        "%s\"%s\":\"%s\"", first ? "" : ",",
+                                                        kv[ki].key, esc);
                                         first = false;
                                     }
                                     const char *sql_tag = "<Global>";
                                     const char *sql_end = "</Global>";
-                                    char sql_map_buf[512]; int smi = 0;
+                                    char sql_map_buf[512];
+                                    int smi = 0;
                                     const char *sp = xml;
                                     bool sql_first = true;
                                     while ((sp = strstr(sp, sql_tag)) != NULL) {
                                         sp += strlen(sql_tag);
                                         const char *ep = strstr(sp, sql_end);
-                                        if (!ep) break;
+                                        if (!ep)
+                                            break;
                                         size_t glen = (size_t)(ep - sp);
                                         if (smi + (int)glen + 2 < (int)sizeof(sql_map_buf) - 1) {
-                                            if (!sql_first) sql_map_buf[smi++] = ' ';
+                                            if (!sql_first)
+                                                sql_map_buf[smi++] = ' ';
                                             memcpy(sql_map_buf + smi, sp, glen);
                                             smi += (int)glen;
                                             sql_first = false;
@@ -3565,13 +3587,14 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
                                     }
                                     sql_map_buf[smi] = '\0';
                                     if (smi > 0) {
-                                        pos += snprintf(props+pos, sizeof(props)-pos,
-                                            "%s\"sql_map_globals\":\"%s\"",
-                                            first ? "" : ",", sql_map_buf);
+                                        pos += snprintf(props + pos, sizeof(props) - pos,
+                                                        "%s\"sql_map_globals\":\"%s\"",
+                                                        first ? "" : ",", sql_map_buf);
                                         first = false;
                                     }
-                                    if (pos < (int)sizeof(props)-1) {
-                                        props[pos++] = '}'; props[pos] = '\0';
+                                    if (pos < (int)sizeof(props) - 1) {
+                                        props[pos++] = '}';
+                                        props[pos] = '\0';
                                     }
                                     if (!first) {
                                         mdef.docstring = cbm_arena_strdup(a, props);
@@ -3588,16 +3611,24 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
                                 mdef.body_tokens = extract_body_ident_tokens(ctx, tbody);
                                 char *raw = cbm_node_text(a, tbody, ctx->source);
                                 if (raw && raw[0]) {
-                                    char esc[CBM_SZ_512]; int ei = 0;
-                                    for (int _ci = 0; raw[_ci] && ei < (int)sizeof(esc) - 3; _ci++) {
-                                        if (raw[_ci] == '"' || raw[_ci] == '\\') esc[ei++] = '\\';
-                                        else if (raw[_ci] == '\n') { esc[ei++] = '\\'; esc[ei++] = 'n'; continue; }
-                                        else if (raw[_ci] == '\r') continue;
+                                    char esc[CBM_SZ_512];
+                                    int ei = 0;
+                                    for (int _ci = 0; raw[_ci] && ei < (int)sizeof(esc) - 3;
+                                         _ci++) {
+                                        if (raw[_ci] == '"' || raw[_ci] == '\\')
+                                            esc[ei++] = '\\';
+                                        else if (raw[_ci] == '\n') {
+                                            esc[ei++] = '\\';
+                                            esc[ei++] = 'n';
+                                            continue;
+                                        } else if (raw[_ci] == '\r')
+                                            continue;
                                         esc[ei++] = raw[_ci];
                                     }
                                     esc[ei] = '\0';
                                     char props[CBM_SZ_512];
-                                    snprintf(props, sizeof(props), "{\"trigger_body\":\"%s\"}", esc);
+                                    snprintf(props, sizeof(props), "{\"trigger_body\":\"%s\"}",
+                                             esc);
                                     mdef.docstring = cbm_arena_strdup(a, props);
                                 }
                             }
@@ -3611,7 +3642,8 @@ static void extract_class_fields(CBMExtractCtx *ctx, TSNode class_node, const ch
         }
 
         TSNode type_node = ts_node_child_by_field_name(child, TS_FIELD("type"));
-        TSNode name_node = ts_node_is_null(type_node) ? (TSNode){0} : resolve_field_name_node(child);
+        TSNode name_node =
+            ts_node_is_null(type_node) ? (TSNode){0} : resolve_field_name_node(child);
 
         if (ts_node_is_null(type_node)) {
             uint32_t cnc = ts_node_named_child_count(child);
