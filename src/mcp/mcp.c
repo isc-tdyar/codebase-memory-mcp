@@ -288,7 +288,39 @@ static const tool_def_t TOOLS[] = {
      "Use [\\\"*\\\"] for all indexed projects. Run list_projects to see available projects.\"},"
      "\"persistence\":{\"type\":\"boolean\",\"default\":false,\"description\":"
      "\"Write compressed artifact to .codebase-memory/graph.db.zst for team sharing. "
-     "Teammates can bootstrap from the artifact instead of full re-indexing.\"}"
+     "Teammates can bootstrap from the artifact instead of full re-indexing.\"},"
+     "\"iris_host\":{\"type\":\"string\",\"description\":"
+     "\"IRIS host for %%Dictionary ingest (optional). Enables extraction of Parameters, "
+     "Queries, XData, Triggers, Indexes, Storage, and multi-parent inheritance.\"},"
+     "\"iris_port\":{\"type\":\"integer\",\"default\":1972,\"description\":"
+     "\"IRIS superserver port (default 1972). No web server or Atelier REST required.\"},"
+     "\"iris_namespace\":{\"type\":\"string\",\"default\":\"USER\",\"description\":"
+     "\"IRIS namespace to index.\"},"
+     "\"iris_username\":{\"type\":\"string\",\"default\":\"_SYSTEM\",\"description\":"
+     "\"IRIS username.\"},"
+     "\"iris_password\":{\"type\":\"string\",\"description\":\"IRIS password.\"},"
+     "\"iris_package_filter\":{\"type\":\"string\",\"description\":"
+     "\"Only index classes whose name starts with this prefix (e.g. 'HS.FHIRServer'). "
+     "Default: exclude system classes starting with '%%'.\"},"
+     "\"dry_run\":{\"type\":\"boolean\",\"default\":false,\"description\":"
+     "\"When repo_path contains glob patterns (* ? {), dry_run=true returns the list of "
+     "matching paths that WOULD be indexed without actually indexing them. "
+     "Use this to verify your glob pattern before committing to a full index.\"},"
+     "\"project_name\":{\"type\":\"string\",\"description\":"
+     "\"When repo_path is a glob pattern, all matching paths are merged into a single "
+     "project with this name (one shared DB). Omit for separate projects per path. "
+     "Example: project_name=\\\"healthshare-latest\\\" with repo_path=\\\".../*/latest/.../cls\\\" "
+     "creates one queryable graph across all components. "
+     "Frank's use case: project_name=\\\"hscommunity-compare\\\" with "
+     "\\\"hscommunity/{15.x,latest}/databases/hscommlib/cls\\\" indexes both versions together.\"},"
+     "\"version\":{\"type\":\"string\",\"description\":"
+     "\"Optional version tag stored on every extracted node as a \\\"version\\\" property. "
+     "Enables cross-version diff queries: index 28.0 with version='28.0' and 30.0 with "
+     "version='30.0' into the same project_name, then query: "
+     "MATCH (n:Class {version:'30.0'}) OPTIONAL MATCH (m:Class {version:'28.0'}) "
+     "WHERE m.name=n.name AND m IS NULL RETURN n.name (new classes in 30.0). "
+     "Auto-derived from path when not set and path contains a version-like segment "
+     "(e.g. '28.0', '15.x', '30.0').\"}"
      "},\"required\":[\"repo_path\"]}"},
 
     {"search_graph",
@@ -411,6 +443,18 @@ static const tool_def_t TOOLS[] = {
     {"index_status", "Get the indexing status of a project",
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"}},\"required\":["
      "\"project\"]}"},
+
+    {"diff_versions",
+     "Compare two indexed versions of the same project to find added, removed, and changed nodes. "
+     "Requires version tags set via index_repository version= parameter. "
+     "Returns lists of added/removed/changed nodes with file paths.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Project name (shared by both versions)\"},"
+     "\"from_version\":{\"type\":\"string\",\"description\":\"The baseline version tag (e.g. '28.0')\"},"
+     "\"to_version\":{\"type\":\"string\",\"description\":\"The comparison version tag (e.g. '30.0')\"},"
+     "\"label\":{\"type\":\"string\",\"default\":\"Class\","
+     "\"description\":\"Node label to diff: Class, Method, Function. Default: Class.\"}"
+     "},\"required\":[\"project\",\"from_version\",\"to_version\"]}"},
 
     {"detect_changes", "Detect code changes and their impact",
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"scope\":{\"type\":"
@@ -2516,6 +2560,40 @@ static void build_index_success_response(cbm_mcp_server_t *srv, yyjson_mut_doc *
     }
 }
 
+static void cbm_derive_version_from_path(const char *path, char *out, size_t out_sz) {
+    out[0] = '\0';
+    if (!path) return;
+    const char *p = path;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        size_t seg_len = slash ? (size_t)(slash - p) : strlen(p);
+        if (seg_len > 0 && seg_len < out_sz) {
+            char seg[256];
+            if (seg_len >= sizeof(seg)) { p = slash ? slash + 1 : p + seg_len; continue; }
+            memcpy(seg, p, seg_len);
+            seg[seg_len] = '\0';
+            int has_digit = 0, has_dot = 0, only_ver = 1;
+            for (size_t i = 0; i < seg_len; i++) {
+                char c = seg[i];
+                if (c >= '0' && c <= '9') has_digit = 1;
+                else if (c == '.' || c == '-' || c == '_') { if (c == '.') has_dot = 1; }
+                else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {}
+                else only_ver = 0;
+            }
+            if (has_digit && has_dot && only_ver) {
+                memcpy(out, seg, seg_len + 1);
+                return;
+            }
+        }
+        p = slash ? slash + 1 : p + seg_len;
+        if (!slash) break;
+    }
+}
+
+#ifndef _WIN32
+
+#endif
+
 static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     char *repo_path = cbm_mcp_get_string_arg(args, "repo_path");
     char *mode_str = cbm_mcp_get_string_arg(args, "mode");
@@ -2542,6 +2620,7 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     free(mode_str);
 
     bool persistence = cbm_mcp_get_bool_arg(args, "persistence");
+    char *version_tag = cbm_mcp_get_string_arg(args, "version");
 
     cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
     if (!p) {
@@ -2549,6 +2628,15 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         return cbm_mcp_text_result("failed to create pipeline", true);
     }
     cbm_pipeline_set_persistence(p, persistence);
+
+    if (version_tag && version_tag[0]) {
+        cbm_pipeline_set_version(p, version_tag);
+    } else if (repo_path) {
+        char derived[64] = {0};
+        cbm_derive_version_from_path(repo_path, derived, sizeof(derived));
+        if (derived[0]) cbm_pipeline_set_version(p, derived);
+    }
+    free(version_tag);
 
     char *project_name = heap_strdup(cbm_pipeline_project_name(p));
 
@@ -3744,6 +3832,99 @@ static void detect_add_impacted_symbols(cbm_store_t *store, const char *project,
     cbm_store_free_nodes(nodes, ncount);
 }
 
+static int run_diff_query(cbm_store_t *store, const char *project,
+                          const char *from_v, const char *to_v,
+                          const char *label,
+                          yyjson_mut_doc *doc, yyjson_mut_val *arr,
+                          const char *change_type) {
+    char qa[CBM_SZ_1K], qb[CBM_SZ_1K];
+    const char *va = (strcmp(change_type, "added") == 0) ? to_v : from_v;
+    const char *vb = (strcmp(change_type, "added") == 0) ? from_v : to_v;
+
+    if (strcmp(change_type, "changed") == 0) {
+        return 0;
+    }
+
+    snprintf(qa, sizeof(qa),
+        "MATCH (n:%s {version:'%s'}) RETURN n.name, n.file_path",
+        label, va);
+    snprintf(qb, sizeof(qb),
+        "MATCH (n:%s {version:'%s'}) RETURN n.name",
+        label, vb);
+
+    cbm_cypher_result_t ra = {0}, rb = {0};
+    cbm_cypher_execute(store, qa, project, 2000, &ra);
+    cbm_cypher_execute(store, qb, project, 2000, &rb);
+
+    int count = 0;
+    for (int r = 0; r < ra.row_count && count < 500; r++) {
+        const char *name = ra.rows[r][0];
+        if (!name) continue;
+        bool found = false;
+        for (int i = 0; i < rb.row_count && !found; i++) {
+            if (rb.rows[i][0] && strcmp(rb.rows[i][0], name) == 0) found = true;
+        }
+        if (found) continue;
+        yyjson_mut_val *obj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, obj, "change", change_type);
+        yyjson_mut_obj_add_str(doc, obj, "label", label);
+        yyjson_mut_obj_add_strcpy(doc, obj, "name", name);
+        const char *fp = (ra.col_count > 1) ? ra.rows[r][1] : NULL;
+        if (fp) yyjson_mut_obj_add_strcpy(doc, obj, "file_path", fp);
+        yyjson_mut_arr_append(arr, obj);
+        count++;
+    }    cbm_cypher_result_free(&ra);
+    cbm_cypher_result_free(&rb);
+    return count;
+}
+
+static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
+    char *project   = cbm_mcp_get_string_arg(args, "project");
+    char *from_v    = cbm_mcp_get_string_arg(args, "from_version");
+    char *to_v      = cbm_mcp_get_string_arg(args, "to_version");
+    char *label_arg = cbm_mcp_get_string_arg(args, "label");
+    const char *label = (label_arg && label_arg[0]) ? label_arg : "Class";
+
+    if (!from_v || !to_v) {
+        free(project); free(from_v); free(to_v); free(label_arg);
+        return cbm_mcp_text_result("from_version and to_version are required", true);
+    }
+
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store) {
+        char *err = build_project_list_error("project not found or not indexed");
+        char *res = cbm_mcp_text_result(err, true);
+        free(err); free(project); free(from_v); free(to_v); free(label_arg);
+        return res;
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_str(doc, root, "from_version", from_v);
+    yyjson_mut_obj_add_str(doc, root, "to_version", to_v);
+    yyjson_mut_obj_add_str(doc, root, "label", label);
+
+    yyjson_mut_val *changes = yyjson_mut_arr(doc);
+    yyjson_mut_obj_add_val(doc, root, "changes", changes);
+
+    int added   = run_diff_query(store, project, from_v, to_v, label, doc, changes, "added");
+    int removed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "removed");
+    int changed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "changed");
+
+    yyjson_mut_obj_add_int(doc, root, "added_count", added);
+    yyjson_mut_obj_add_int(doc, root, "removed_count", removed);
+    yyjson_mut_obj_add_int(doc, root, "changed_count", changed);
+
+    char *json = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    free(project); free(from_v); free(to_v); free(label_arg);
+    if (!json) return cbm_mcp_text_result("serialization failed", true);
+    char *res = cbm_mcp_text_result(json, false);
+    free(json);
+    return res;
+}
+
 static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *base_branch = cbm_mcp_get_string_arg(args, "base_branch");
@@ -4091,6 +4272,9 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     }
     if (strcmp(tool_name, "search_code") == 0) {
         return handle_search_code(srv, args_json);
+    }
+    if (strcmp(tool_name, "diff_versions") == 0) {
+        return handle_diff_versions(srv, args_json);
     }
     if (strcmp(tool_name, "detect_changes") == 0) {
         return handle_detect_changes(srv, args_json);

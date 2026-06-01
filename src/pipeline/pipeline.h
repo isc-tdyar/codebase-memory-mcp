@@ -49,6 +49,15 @@ cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path, cbm
  * When enabled, the pipeline writes a compressed artifact after indexing. */
 void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled);
 
+void cbm_pipeline_set_version(cbm_pipeline_t *p, const char *version_tag);
+
+/* Configure IRIS %Dictionary ingest. All strings are copied; pass NULL to disable.
+ * port defaults to 1972 if <= 0. pkg_filter restricts to classes starting with prefix. */
+void cbm_pipeline_set_iris(cbm_pipeline_t *p,
+                           const char *host, int port,
+                           const char *ns, const char *user,
+                           const char *pass, const char *pkg_filter);
+
 /* Free a pipeline and all its internal state. NULL-safe. */
 void cbm_pipeline_free(cbm_pipeline_t *p);
 

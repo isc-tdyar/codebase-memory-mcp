@@ -75,7 +75,16 @@ struct cbm_pipeline {
     char *project_name;
     cbm_index_mode_t mode;
     atomic_int cancelled;
-    bool persistence; /* write .codebase-memory/graph.db.zst after indexing */
+    bool persistence;
+    char *version_tag;
+
+    /* IRIS %Dictionary ingest (optional — NULL if not configured) */
+    char *iris_host;
+    int   iris_port;
+    char *iris_namespace;
+    char *iris_user;
+    char *iris_pass;
+    char *iris_package_filter;
 
     /* Indexing state (set during run) */
     cbm_gbuf_t *gbuf;
@@ -145,6 +154,26 @@ void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
     }
 }
 
+void cbm_pipeline_set_version(cbm_pipeline_t *p, const char *version_tag) {
+    if (!p) return;
+    free(p->version_tag);
+    p->version_tag = version_tag ? strdup(version_tag) : NULL;
+}
+
+void cbm_pipeline_set_iris(cbm_pipeline_t *p,
+                           const char *host, int port,
+                           const char *ns, const char *user,
+                           const char *pass, const char *pkg_filter) {
+    if (!p) { return; }
+    free(p->iris_host);      p->iris_host      = host      ? strdup(host)       : NULL;
+    free(p->iris_namespace); p->iris_namespace = ns        ? strdup(ns)         : NULL;
+    free(p->iris_user);      p->iris_user      = user      ? strdup(user)       : NULL;
+    free(p->iris_pass);      p->iris_pass      = pass      ? strdup(pass)       : NULL;
+    free(p->iris_package_filter);
+    p->iris_package_filter = pkg_filter ? strdup(pkg_filter) : NULL;
+    p->iris_port = port > 0 ? port : 1972;
+}
+
 void cbm_pipeline_free(cbm_pipeline_t *p) {
     if (!p) {
         return;
@@ -152,6 +181,12 @@ void cbm_pipeline_free(cbm_pipeline_t *p) {
     free(p->repo_path);
     free(p->db_path);
     free(p->project_name);
+    free(p->iris_host);
+    free(p->iris_namespace);
+    free(p->iris_user);
+    free(p->iris_pass);
+    free(p->iris_package_filter);
+    free(p->version_tag);
     /* gbuf, store, registry freed during/after run */
     /* Defensively free userconfig in case run() was never called or panicked */
     if (p->userconfig) {
@@ -684,7 +719,7 @@ static int try_incremental_or_delete_db(cbm_pipeline_t *p, cbm_file_info_t *file
         return CBM_NOT_FOUND;
     }
     cbm_store_t *check_store = cbm_store_open_path(db_path);
-    if (check_store && cbm_store_check_integrity(check_store)) {
+    if (check_store && cbm_store_check_integrity(check_store) && !p->version_tag) {
         cbm_file_hash_t *hashes = NULL;
         int hash_count = 0;
         cbm_store_get_file_hashes(check_store, p->project_name, &hashes, &hash_count);
@@ -909,6 +944,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     if (!p) {
         return CBM_NOT_FOUND;
     }
+    
 
     CBM_PROF_START(t_pipeline_total);
     struct timespec t0;
@@ -967,7 +1003,9 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         .cancelled = &p->cancelled,
         .mode = (int)p->mode,
         .path_aliases = path_aliases,
+        .version_tag = p->version_tag,
     };
+    
 
     rc = run_extraction_phase(p, &ctx, files, file_count);
     if (rc != 0) {

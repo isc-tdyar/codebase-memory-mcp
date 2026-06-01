@@ -221,21 +221,6 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
         append_json_string(buf, bufsize, &pos, "version", version_tag);
     }
 
-    /* Storage block parsed fields — stored as raw JSON fragment in docstring.
-     * Merge inline instead of escaping: {"extent_size":"...","data_global":"...",...} */
-    if (def->label && strcmp(def->label, "Storage") == 0 &&
-        def->docstring && def->docstring[0] == '{') {
-        const char *frag = def->docstring + 1;
-        size_t flen = strlen(frag);
-        if (flen > 1 && frag[flen-1] == '}') flen--;
-        if (pos + flen + 2 < bufsize) {
-            buf[pos++] = ',';
-            memcpy(buf + pos, frag, flen);
-            pos += flen;
-        }
-        /* Clear docstring so it doesn't get double-appended above */
-    }
-
     if (pos < bufsize - SKIP_ONE) {
         buf[pos] = '}';
         buf[pos + SKIP_ONE] = '\0';
