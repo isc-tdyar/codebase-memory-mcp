@@ -32,7 +32,7 @@
 
 static CBMFileResult *extract_cs(const char *source) {
     return cbm_extract_file(source, (int)strlen(source), CBM_LANG_CSHARP, "test", "main.cs", 0,
-                            NULL, NULL);
+                            NULL, NULL, NULL, NULL);
 }
 
 static int find_resolved(const CBMFileResult *r, const char *callerSub, const char *calleeSub) {

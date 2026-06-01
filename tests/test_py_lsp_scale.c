@@ -54,7 +54,7 @@ static double measure(int n_classes, int *out_calls, int *out_resolved) {
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     CBMFileResult *r = cbm_extract_file(src, slen, CBM_LANG_PYTHON,
-        "test", "scale.py", 0, NULL, NULL);
+        "test", "scale.py", 0, NULL, NULL, NULL, NULL);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double ms = elapsed_ms(t0, t1);
     if (out_calls) *out_calls = r ? r->calls.count : 0;

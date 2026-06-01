@@ -166,7 +166,10 @@ typedef enum {
     CBM_LANG_SOSL,
     CBM_LANG_KUSTOMIZE, // kustomization.yaml — Kubernetes overlay tool
     CBM_LANG_K8S,       // Generic Kubernetes manifest (apiVersion: detected)
-    CBM_LANG_PINE,      // Pine Script (TradingView indicator / strategy language)
+    CBM_LANG_PINE,               // Pine Script (TradingView indicator / strategy language)
+    CBM_LANG_OBJECTSCRIPT_UDL,   // InterSystems ObjectScript UDL (.cls class files)
+    CBM_LANG_OBJECTSCRIPT_ROUTINE, // InterSystems ObjectScript routine (.mac/.int/.rtn/.inc)
+    CBM_LANG_OBJECTSCRIPT_EXPORT,  // InterSystems Studio Export XML (<Export generator="Cache">)
     CBM_LANG_COUNT
 } CBMLanguage;
 
@@ -431,15 +434,6 @@ typedef struct {
     int imports_count;
     TSTree *cached_tree;     // retained parse tree (caller frees via cbm_free_tree)
     CBMLanguage cached_lang; // language of cached tree (for parser selection)
-
-    // Retained source bytes — copied into `arena` by the parallel
-    // extract pass so the fused cross-file LSP step in resolve_worker
-    // can run without re-reading the file from disk. NULL when the
-    // file exceeded the per-file (100 MB) or total (2 GB) retention
-    // cap; in that case the cross-file LSP step is skipped for this
-    // file (defs/calls already extracted are unaffected).
-    const char *source;
-    int source_len;
 } CBMFileResult;
 
 // --- Enclosing function cache ---
@@ -468,6 +462,20 @@ typedef struct {
     int count;
 } CBMStringConstantMap;
 
+typedef struct CBMMacroTable CBMMacroTable;
+
+#define CBM_RETURN_TYPE_TABLE_CAP 2048
+
+typedef struct {
+    const char *method_qn;
+    const char *return_type;
+} CBMReturnTypeEntry;
+
+typedef struct {
+    CBMReturnTypeEntry entries[CBM_RETURN_TYPE_TABLE_CAP];
+    int count;
+} CBMReturnTypeTable;
+
 typedef struct {
     CBMArena *arena;
     CBMFileResult *result;
@@ -478,9 +486,11 @@ typedef struct {
     const char *rel_path;
     const char *module_qn;
     TSNode root;
-    EFCache ef_cache;                      // enclosing function cache
-    const char *enclosing_class_qn;        // for nested class QN computation
-    CBMStringConstantMap string_constants; // module-level NAME = "value" pairs
+    EFCache ef_cache;
+    const char *enclosing_class_qn;
+    CBMStringConstantMap string_constants;
+    const CBMMacroTable *macro_table;
+    const CBMReturnTypeTable *return_type_table;
 } CBMExtractCtx;
 
 // --- Public API ---
@@ -493,8 +503,10 @@ int cbm_init(void);
 // timeout_micros: per-file parse timeout in microseconds (0 = no timeout).
 CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage language,
                                 const char *project, const char *rel_path, int64_t timeout_micros,
-                                const char **extra_defines, // NULL-terminated, or NULL
-                                const char **include_paths  // NULL-terminated, or NULL
+                                const char **extra_defines,
+                                const char **include_paths,
+                                const CBMMacroTable *macro_table,
+                                const CBMReturnTypeTable *return_type_table
 );
 
 // Free all memory associated with a result.

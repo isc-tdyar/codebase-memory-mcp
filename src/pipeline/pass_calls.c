@@ -46,9 +46,7 @@ static char *read_file(const char *path, int *out_len) {
         return NULL;
     }
 
-    /* +pad: tree-sitter lexer lookahead reads past EOF; keep it in-bounds */
-    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
-    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
+    char *buf = malloc(size + SKIP_ONE);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -60,7 +58,7 @@ static char *read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
+    buf[nread] = '\0';
     *out_len = (int)nread;
     return buf;
 }
@@ -92,6 +90,54 @@ static char *extract_local_name_from_json(const char *props_json) {
         return NULL;
     }
     return cbm_strndup(start, end - start);
+}
+
+static CBMReturnTypeTable *build_return_type_table(const cbm_gbuf_t *gbuf) {
+    if (!gbuf) return NULL;
+    const cbm_gbuf_node_t **method_nodes = NULL;
+    int method_count = cbm_gbuf_find_by_label(gbuf, "Method", &method_nodes, 0);
+    if (method_count <= 0 || !method_nodes) return NULL;
+
+    CBMReturnTypeTable *rtt = (CBMReturnTypeTable *)calloc(1, sizeof(CBMReturnTypeTable));
+    if (!rtt) { free(method_nodes); return NULL; }
+
+    static const char *scalar_types[] = {
+        "%String", "%Integer", "%Float", "%Boolean", "%Status",
+        "%Numeric", "%Date", "%Time", "%TimeStamp", "%Binary", NULL
+    };
+
+    for (int i = 0; i < method_count && rtt->count < CBM_RETURN_TYPE_TABLE_CAP; i++) {
+        const cbm_gbuf_node_t *n = method_nodes[i];
+        if (!n->qualified_name || !n->properties_json) continue;
+
+        const char *p = strstr(n->properties_json, "\"return_type\":");
+        if (!p) continue;
+        p += 14;
+        while (*p == ' ') p++;
+        if (*p != '"') continue;
+        p++;
+        const char *end = strchr(p, '"');
+        if (!end) continue;
+        int rtlen = (int)(end - p);
+        if (rtlen <= 0 || rtlen > 255) continue;
+
+        char rt_buf[256];
+        memcpy(rt_buf, p, rtlen);
+        rt_buf[rtlen] = '\0';
+
+        bool is_scalar = false;
+        for (int si = 0; scalar_types[si]; si++) {
+            if (strcmp(rt_buf, scalar_types[si]) == 0) { is_scalar = true; break; }
+        }
+        if (is_scalar) continue;
+
+        rtt->entries[rtt->count].method_qn = n->qualified_name;
+        rtt->entries[rtt->count].return_type = strdup(rt_buf);
+        rtt->count++;
+    }
+    free(method_nodes);
+    if (rtt->count == 0) { free(rtt); return NULL; }
+    return rtt;
 }
 
 static int build_import_map(cbm_pipeline_ctx_t *ctx, const char *rel_path,
@@ -308,6 +354,21 @@ static void emit_classified_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
              esc_c2, res->confidence, res->strategy ? res->strategy : "unknown",
              res->candidate_count);
     cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "CALLS", props);
+
+    if (call->arg_count > 0) {
+        char args_prop[CBM_SZ_512];
+        int apos = 0;
+        apos += snprintf(args_prop + apos, sizeof(args_prop) - apos, "{\"args\":\"");
+        for (int ai = 0; ai < call->arg_count && ai < CBM_MAX_CALL_ARGS; ai++) {
+            const char *expr = call->args[ai].expr ? call->args[ai].expr : "";
+            char esc_arg[128];
+            cbm_json_escape(esc_arg, sizeof(esc_arg), expr);
+            apos += snprintf(args_prop + apos, sizeof(args_prop) - apos,
+                             ai > 0 ? ",%d:%s" : "%d:%s", ai, esc_arg);
+        }
+        snprintf(args_prop + apos, sizeof(args_prop) - apos, "\"}");
+        cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "DATA_FLOWS", args_prop);
+    }
 }
 
 /* Find source node for a call: enclosing function or file node. */
@@ -348,8 +409,8 @@ static int resolve_single_call(cbm_pipeline_ctx_t *ctx, CBMCall *call,
             res.confidence = lsp->confidence;
             res.strategy = lsp->strategy;
             res.candidate_count = 1;
-            emit_classified_edge(ctx, call, source_node, target_node, &res, module_qn, imp_keys,
-                                 imp_vals, imp_count);
+            emit_classified_edge(ctx, call, source_node, target_node, &res, module_qn,
+                                 imp_keys, imp_vals, imp_count);
             return SKIP_ONE;
         }
     }
@@ -380,7 +441,8 @@ static CBMFileResult *calls_get_or_extract(cbm_pipeline_ctx_t *ctx, int idx,
         return NULL;
     }
     CBMFileResult *r = cbm_extract_file(src, slen, fi->language, ctx->project_name, fi->rel_path,
-                                        CBM_EXTRACT_BUDGET, NULL, NULL);
+                                        CBM_EXTRACT_BUDGET, NULL, NULL,
+                                        ctx->macro_table, ctx->return_type_table);
     free(src);
     if (r) {
         *owned = true;
@@ -390,6 +452,13 @@ static CBMFileResult *calls_get_or_extract(cbm_pipeline_ctx_t *ctx, int idx,
 
 int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count) {
     cbm_log_info("pass.start", "pass", "calls", "files", itoa_log(file_count));
+
+    if (!ctx->return_type_table) {
+        CBMReturnTypeTable *rtt = build_return_type_table(ctx->gbuf);
+        if (rtt) {
+            ctx->return_type_table = rtt;
+        }
+    }
 
     int total_calls = 0;
     int resolved = 0;
@@ -402,6 +471,11 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
         }
 
         const char *rel = files[i].rel_path;
+
+        if (files[i].language == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            continue;
+        }
+
         bool result_owned = false;
         CBMFileResult *result = calls_get_or_extract(ctx, i, &files[i], &result_owned);
         if (!result) {
@@ -432,8 +506,8 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
                 continue;
             }
             total_calls++;
-            if (resolve_single_call(ctx, call, &result->resolved_calls, rel, module_qn, imp_keys,
-                                    imp_vals, imp_count)) {
+            if (resolve_single_call(ctx, call, &result->resolved_calls, rel, module_qn,
+                                    imp_keys, imp_vals, imp_count)) {
                 resolved++;
             } else {
                 unresolved++;

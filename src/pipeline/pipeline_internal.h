@@ -11,11 +11,12 @@
 #include "pipeline/pipeline.h"
 #include "pipeline/path_alias.h"
 #include "graph_buffer/graph_buffer.h"
-#include "discover/discover.h"
-#include "foundation/hash_table.h"
-#include "cbm.h"
-#include "lsp/go_lsp.h" /* CBMLSPDef for cbm_parallel_resolve cross-LSP inputs */
-#include <stdatomic.h>
+ #include "discover/discover.h"
+ #include "foundation/hash_table.h"
+ #include "cbm.h"
+ #include "macro_table.h"
+ #include "lsp/go_lsp.h" /* CBMLSPDef for cbm_parallel_resolve cross-LSP inputs */
+ #include <stdatomic.h>
 
 /* ── Shared pipeline constants ─────────────────────────────────── */
 
@@ -57,7 +58,7 @@ typedef struct {
     cbm_gbuf_t *gbuf;         /* owned by pipeline */
     cbm_registry_t *registry; /* owned by pipeline */
     atomic_int *cancelled;    /* pointer to pipeline's cancelled flag */
-    int mode;                 /* cbm_index_mode_t (0=full, 1=moderate, 2=fast, 3=advanced) */
+    int mode;                 /* cbm_index_mode_t (0=full, 1=moderate, 2=fast) */
 
     /* Extraction result cache (sequential pipeline optimization).
      * When non-NULL, pass_definitions stores results here instead of freeing,
@@ -69,6 +70,10 @@ typedef struct {
      * configs are an easy follow-on). NULL when no usable configs were found.
      * Owned by pipeline.c / pipeline_incremental.c. */
     const cbm_path_alias_collection_t *path_aliases;
+
+    const CBMMacroTable *macro_table;
+    const CBMReturnTypeTable *return_type_table;
+    const char *version_tag;
 } cbm_pipeline_ctx_t;
 
 /* Get the current pipeline's package map (NULL if none). */
@@ -90,13 +95,12 @@ CBMHashTable *cbm_pkgmap_build(cbm_pkg_entries_t *worker_entries, int worker_cou
                                const char *project_name);
 
 /* Build pkgmap by reading manifest files from the files array (sequential path). */
-int cbm_pkgmap_scan_repo(const char *repo_path, cbm_pkg_entries_t *entries);
+ CBMHashTable *cbm_pkgmap_build_from_files(const cbm_file_info_t *files, int file_count,
+                                           const char *project_name);
 CBMHashTable *cbm_pkgmap_build_from_repo(const char *repo_path, const cbm_file_info_t *files,
                                          int file_count, const char *project_name);
-CBMHashTable *cbm_pkgmap_build_from_files(const cbm_file_info_t *files, int file_count,
-                                          const char *project_name);
 
-/* Free pkgmap and all owned strings. */
+ /* Free pkgmap and all owned strings. */
 void cbm_pkgmap_free(CBMHashTable *pkgmap);
 
 /* Check cancellation. Returns non-zero if cancelled. */
@@ -367,34 +371,13 @@ int cbm_build_registry_from_cache(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
  * Each worker resolves calls, usages, throws, rw, inherits, decorates,
  * and implements edges into per-worker edge bufs, then merges.
  * Runs Go-style implicit IMPLEMENTS as serial post-step. */
-/* Opaque module-def index — defined in pass_lsp_cross.c. Forward-declared
- * here so we can include it in cbm_parallel_resolve's signature without
- * pulling the pass header into every consumer of pipeline_internal.h. */
 struct CBMModuleDefIndex;
-
-/* cbm_parallel_resolve's cross_registries param is typed `void*` to avoid
- * pulling lsp/go_lsp.h into every TU that includes pipeline_internal.h.
- * Callers cast a CBMCrossLspRegistries* (defined in pass_lsp_cross.h). */
-
 int cbm_parallel_resolve(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count,
                          CBMFileResult **result_cache, _Atomic int64_t *shared_ids,
                          int worker_count,
-                         /* Cross-file LSP inputs — pre-built once by the caller and
-                          * shared read-only across workers (typed non-const to match
-                          * the existing cbm_run_X_lsp_cross signatures the resolve
-                          * worker forwards them to). Pass NULL/0/NULL to skip. */
                          CBMLSPDef *all_defs, int def_count, char *const *def_modules,
-                         /* Optional inverted index module_qn → defs[] — fallback
-                          * path when there's no pre-built registry for this lang. */
                          struct CBMModuleDefIndex *module_def_index,
-                         /* Optional Tier 2 full: pre-built per-language registries.
-                          * For each language with a non-NULL entry, workers use the
-                          * cbm_run_X_lsp_cross_with_registry fast path (skip per-
-                          * file registry build entirely). Falls back to the filter
-                          * + per-file build path when entry is NULL or struct is NULL.
-                          * Typed as void* here to dodge the typedef/tag ordering
-                          * problem — pass_parallel.c casts back to CBMCrossLspRegistries*. */
-                         void *cross_registries);
+                         void *cross_registries_v);
 
 /* Post-merge: create Route nodes for HTTP_CALLS/ASYNC_CALLS edges that
  * have url_path in properties but point to library functions instead of routes.
@@ -413,8 +396,10 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
 /* Cross-file LSP type-aware call resolution pass. Augments per-file
  * resolved_calls with cross-file resolutions before call edges are emitted.
  * Implementation: src/pipeline/pass_lsp_cross.c. */
-int cbm_pipeline_pass_lsp_cross(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
-                                int file_count, CBMFileResult **cache);
+int cbm_pipeline_pass_lsp_cross(cbm_pipeline_ctx_t *ctx,
+                                const cbm_file_info_t *files,
+                                int file_count,
+                                CBMFileResult **cache);
 
 /* Sub-passes called from pass_calls: pattern-based edge extraction */
 void cbm_pipeline_pass_fastapi_depends(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
@@ -451,10 +436,12 @@ int cbm_pipeline_githistory_apply(cbm_pipeline_ctx_t *ctx, const cbm_githistory_
 int cbm_pipeline_pass_decorator_tags(cbm_gbuf_t *gbuf, const char *project);
 
 /* Pre-dump pass: config ↔ code linking. */
-int cbm_pipeline_pass_configlink(cbm_pipeline_ctx_t *ctx);
+ int cbm_pipeline_pass_configlink(cbm_pipeline_ctx_t *ctx);
 
-/* Pre-dump pass: SIMILAR_TO edges via MinHash fingerprinting. */
-int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
+ int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
+
+bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz,
+                                 char *method, size_t meth_sz);
 
 /* Pre-dump pass: SEMANTICALLY_RELATED edges via algorithmic embeddings.
  * Opt-in: only runs when CBM_SEMANTIC_ENABLED=1. */
@@ -485,12 +472,5 @@ int cbm_pipeline_run_incremental(cbm_pipeline_t *p, const char *db_path, cbm_fil
 /* Pipeline accessors for incremental use */
 const char *cbm_pipeline_repo_path(const cbm_pipeline_t *p);
 atomic_int *cbm_pipeline_cancelled_ptr(cbm_pipeline_t *p);
-
-/* Parse a gRPC stub call "<service-stub>.<method>" into the canonical proto
- * service name + method. Returns true ONLY when a recognized gRPC stub/client
- * suffix is present (the stub-type signal that gates Route emission, #294).
- * Exposed for testing. */
-bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz, char *method,
-                                 size_t meth_sz);
 
 #endif /* CBM_PIPELINE_INTERNAL_H */

@@ -1,8 +1,9 @@
 #include "cbm.h"
-#include "arena.h" // CBMArena, cbm_arena_sprintf
+#include "arena.h"
 #include "helpers.h"
 #include "lang_specs.h"
 #include "extract_unified.h"
+#include "macro_table.h"
 #include "foundation/constants.h"
 #include "extract_node_stack.h"
 #include "tree_sitter/api.h" // TSNode, ts_node_*
@@ -162,23 +163,6 @@ static char *extract_callee_from_fields(CBMArena *a, TSNode node, const char *so
             strcmp(fk, "member_access_expression") == 0 || strcmp(fk, "scoped_identifier") == 0 ||
             strcmp(fk, "qualified_identifier") == 0) {
             return cbm_node_text(a, func_node, source);
-        }
-        // R member call: module$fn() — function node is an extract_operator
-        // with lhs (object) and rhs (method). Emit "module.fn" so it resolves
-        // like other member calls (#219). Previously dropped → no CALLS edge.
-        if (strcmp(fk, "extract_operator") == 0) {
-            TSNode lhs = ts_node_child_by_field_name(func_node, TS_FIELD("lhs"));
-            TSNode rhs = ts_node_child_by_field_name(func_node, TS_FIELD("rhs"));
-            if (!ts_node_is_null(rhs)) {
-                char *rt = cbm_node_text(a, rhs, source);
-                if (!ts_node_is_null(lhs)) {
-                    char *lt = cbm_node_text(a, lhs, source);
-                    if (lt && lt[0] && rt && rt[0]) {
-                        return cbm_arena_sprintf(a, "%s.%s", lt, rt);
-                    }
-                }
-                return rt;
-            }
         }
     }
 
@@ -343,6 +327,57 @@ static char *extract_callee_lang_specific(CBMArena *a, TSNode node, const char *
         return extract_swift_callee(a, node, source, nk);
     }
 
+    if (lang == CBM_LANG_OBJECTSCRIPT_UDL || lang == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+        if (strcmp(nk, "class_method_call") == 0) {
+            TSNode class_ref = cbm_find_child_by_kind(node, "class_ref");
+            TSNode method_name = cbm_find_child_by_kind(node, "method_name");
+            if (!ts_node_is_null(class_ref) && !ts_node_is_null(method_name)) {
+                TSNode cname = cbm_find_child_by_kind(class_ref, "class_name");
+                if (ts_node_is_null(cname)) {
+                    return NULL;
+                }
+                char *cls = cbm_node_text(a, cname, source);
+                if (!cls || !cls[0]) {
+                    return NULL;
+                }
+                TSNode mname_ident = ts_node_named_child_count(method_name) > 0
+                    ? ts_node_named_child(method_name, 0) : (TSNode){0};
+                if (ts_node_is_null(mname_ident)) {
+                    return cls;
+                }
+                char *meth = cbm_node_text(a, mname_ident, source);
+                if (!meth || !meth[0]) {
+                    return cls;
+                }
+                return cbm_arena_sprintf(a, "%s.%s", cls, meth);
+            }
+            return NULL;
+        }
+        if (strcmp(nk, "routine_tag_call") == 0) {
+            TSNode line_ref = cbm_find_child_by_kind(node, "line_ref");
+            if (!ts_node_is_null(line_ref)) {
+                return cbm_node_text(a, line_ref, source);
+            }
+            return NULL;
+        }
+        if (strcmp(nk, "macro") == 0) {
+            char *raw = cbm_node_text(a, node, source);
+            if (!raw || raw[0] != '$' || raw[1] != '$' || raw[2] != '$') {
+                return NULL;
+            }
+            char *name_start = raw + 3;
+            char *paren = strchr(name_start, '(');
+            if (paren) {
+                *paren = '\0';
+            }
+            if (!name_start[0]) {
+                return NULL;
+            }
+            return cbm_arena_sprintf(a, "$$$%s", name_start);
+        }
+        return NULL;
+    }
+
     return extract_scripting_callee(a, node, source, lang, nk);
 }
 
@@ -400,6 +435,23 @@ static const char *strip_and_validate_string_arg(CBMArena *a, char *text) {
 }
 
 // Extract first string argument from a call's arguments node.
+static const char *extract_nth_string_arg(CBMExtractCtx *ctx, TSNode args, uint32_t n) {
+    uint32_t nc = ts_node_named_child_count(args);
+    uint32_t found = 0;
+    for (uint32_t ai = 0; ai < nc && ai < MAX_POSITIONAL_SCAN + n; ai++) {
+        TSNode arg = ts_node_named_child(args, ai);
+        const char *ak = ts_node_type(arg);
+        if (is_string_like(ak)) {
+            if (found == n) {
+                char *text = cbm_node_text(ctx->arena, arg, ctx->source);
+                return strip_and_validate_string_arg(ctx->arena, text);
+            }
+            found++;
+        }
+    }
+    return NULL;
+}
+
 static const char *extract_first_string_arg(CBMExtractCtx *ctx, TSNode args) {
     uint32_t nc = ts_node_named_child_count(args);
     for (uint32_t ai = 0; ai < nc && ai < MAX_POSITIONAL_SCAN; ai++) {
@@ -445,7 +497,11 @@ static void walk_calls(CBMExtractCtx *ctx, TSNode root, const CBMLangSpec *spec)
             }
         }
 
-        ts_nstack_push_children(&stack, ctx->arena, node);
+        uint32_t count = ts_node_child_count(node);
+        enum { LAST_IDX_OFFSET = 1 };
+        for (int i = (int)(count - LAST_IDX_OFFSET); i >= 0; i--) {
+            ts_nstack_push(&stack, ctx->arena, ts_node_child(node, (uint32_t)i));
+        }
     }
 }
 
@@ -664,6 +720,76 @@ static void extract_jsx_component_ref(CBMExtractCtx *ctx, TSNode node, const cha
     }
 }
 
+static char *resolve_objectscript_instance_call(CBMArena *a, TSNode node, const char *source,
+                                                os_type_map_t *type_map) {
+    TSNode receiver = {0};
+    TSNode oref = {0};
+    const char *nk_first = NULL;
+
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); i++) {
+        TSNode child = ts_node_named_child(node, i);
+        const char *ck = ts_node_type(child);
+        if (strcmp(ck, "lvn") == 0 || strcmp(ck, "variable") == 0) {
+            receiver = child;
+        } else if (strcmp(ck, "relative_dot_property") == 0) {
+            receiver = child;
+            nk_first = "relative_dot_property";
+        } else if (strcmp(ck, "oref_method") == 0) {
+            oref = child;
+        }
+    }
+
+    if (ts_node_is_null(oref)) {
+        return NULL;
+    }
+
+    TSNode method_name_node = cbm_find_child_by_kind(oref, "method_name");
+    if (ts_node_is_null(method_name_node)) {
+        return NULL;
+    }
+    TSNode mn_ident = ts_node_named_child_count(method_name_node) > 0
+        ? ts_node_named_child(method_name_node, 0) : (TSNode){0};
+    if (ts_node_is_null(mn_ident)) {
+        return NULL;
+    }
+    char *method = cbm_node_text(a, mn_ident, source);
+    if (!method || !method[0]) {
+        return NULL;
+    }
+
+    if (ts_node_is_null(receiver)) {
+        return NULL;
+    }
+
+    char *var_text = NULL;
+    if (nk_first && strcmp(nk_first, "relative_dot_property") == 0) {
+        TSNode prop_name = cbm_find_child_by_kind(receiver, "member_name");
+        if (!ts_node_is_null(prop_name)) {
+            char *pname = cbm_node_text(a, prop_name, source);
+            if (pname && pname[0]) {
+                var_text = cbm_arena_sprintf(a, "..%s", pname);
+            }
+        }
+        if (!var_text) {
+            var_text = cbm_node_text(a, receiver, source);
+        }
+    } else {
+        var_text = cbm_node_text(a, receiver, source);
+    }
+
+    if (!var_text || !var_text[0]) {
+        return NULL;
+    }
+
+    for (int i = 0; i < type_map->count; i++) {
+        if (strcasecmp(type_map->entries[i].var_name, var_text) == 0) {
+            return cbm_arena_sprintf(a, "%s.%s", type_map->entries[i].class_name, method);
+        }
+    }
+
+    return NULL;
+}
+
 void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, WalkState *state) {
     if (!spec->call_node_types || !spec->call_node_types[0]) {
         return;
@@ -671,21 +797,120 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
 
     if (cbm_kind_in_set(node, spec->call_node_types)) {
         char *callee = extract_callee_name(ctx->arena, node, ctx->source, ctx->language);
+
+        if (!callee &&
+            (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+             ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
+            strcmp(ts_node_type(node), "instance_method_call") == 0) {
+            callee = resolve_objectscript_instance_call(ctx->arena, node, ctx->source,
+                                                       &state->os_type_map);
+        }
+
+        if (!callee &&
+            (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+             ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
+            strcmp(ts_node_type(node), "relative_dot_method") == 0 &&
+            state->enclosing_class_qn && state->enclosing_class_qn[0]) {
+            TSNode oref = cbm_find_child_by_kind(node, "oref_method");
+            if (!ts_node_is_null(oref)) {
+                TSNode mname_node = cbm_find_child_by_kind(oref, "method_name");
+                if (!ts_node_is_null(mname_node)) {
+                    TSNode ident = ts_node_named_child_count(mname_node) > 0
+                                   ? ts_node_named_child(mname_node, 0) : (TSNode){0};
+                    if (!ts_node_is_null(ident)) {
+                        char *mname = cbm_node_text(ctx->arena, ident, ctx->source);
+                        if (mname && mname[0])
+                            callee = cbm_arena_sprintf(ctx->arena, "%s.%s",
+                                                       state->enclosing_class_qn, mname);
+                    }
+                }
+            }
+        }
+
+        if (callee && callee[0] == '$' && callee[1] == '$' && callee[2] == '$' &&
+            ctx->macro_table) {
+            const char *macro_name = callee + 3;
+            const CBMMacroEntry *entry = cbm_macro_table_find(ctx->macro_table, macro_name);
+            if (entry) {
+                if (entry->resolved_callee) {
+                    callee = cbm_arena_strdup(ctx->arena, entry->resolved_callee);
+                } else if (entry->expansion) {
+                    char *resolved = cbm_macro_extract_callee(ctx->arena, entry->expansion);
+                    callee = resolved;
+                } else {
+                    callee = NULL;
+                }
+            }
+        }
+
         if (callee && callee[0] && !cbm_is_keyword(callee, ctx->language)) {
             CBMCall call = {0};
             call.callee_name = callee;
             call.enclosing_func_qn = state->enclosing_func_qn;
 
             TSNode args = ts_node_child_by_field_name(node, TS_FIELD("arguments"));
+            if (ts_node_is_null(args) &&
+                (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                 ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+                TSNode oref = cbm_find_child_by_kind(node, "oref_method");
+                if (!ts_node_is_null(oref)) {
+                    args = cbm_find_child_by_kind(oref, "method_args");
+                }
+                if (ts_node_is_null(args)) {
+                    args = cbm_find_child_by_kind(node, "method_args");
+                }
+            }
             if (!ts_node_is_null(args)) {
                 call.first_string_arg = extract_url_or_topic_arg(ctx, args);
                 if (call.first_string_arg && call.first_string_arg[0] == '/') {
                     call.second_arg_name = extract_handler_arg(ctx, args);
                 }
-                extract_call_args(ctx, args, &call);
+                if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                    ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
+                    for (uint32_t ai = 0;
+                         ai < ts_node_named_child_count(args) &&
+                         call.arg_count < CBM_MAX_CALL_ARGS;
+                         ai++) {
+                        TSNode achild = ts_node_named_child(args, ai);
+                        const char *ack = ts_node_type(achild);
+                        if (strcmp(ack, "bracket") == 0) continue;
+                        if (strcmp(ack, "method_arg") != 0) continue;
+                        CBMCallArg *ca = &call.args[call.arg_count];
+                        memset(ca, 0, sizeof(*ca));
+                        ca->index = call.arg_count;
+                        ca->expr = cbm_node_text(ctx->arena, achild, ctx->source);
+                        if (ca->expr && ca->expr[0]) {
+                            call.arg_count++;
+                        }
+                    }
+                } else {
+                    extract_call_args(ctx, args, &call);
+                }
             }
 
             cbm_calls_push(&ctx->result->calls, ctx->arena, call);
+
+            if (ctx->language == CBM_LANG_PYTHON && !ts_node_is_null(args)) {
+                const char *cn = call.callee_name;
+                size_t len = cn ? strlen(cn) : 0;
+                static const char *iris_dispatch[] = {
+                    ".classMethodValue", ".classMethodVoid",
+                    ".classMethodBoolean", ".classMethodObject", NULL};
+                for (const char **nm = iris_dispatch; *nm; nm++) {
+                    size_t nlen = strlen(*nm);
+                    if (len >= nlen && strcmp(cn + len - nlen, *nm) == 0) {
+                        const char *cls = extract_nth_string_arg(ctx, args, 0);
+                        const char *mth = extract_nth_string_arg(ctx, args, 1);
+                        if (cls && mth) {
+                            CBMCall xcall = {0};
+                            xcall.callee_name = cbm_arena_sprintf(ctx->arena, "%s.%s", cls, mth);
+                            xcall.enclosing_func_qn = call.enclosing_func_qn;
+                            cbm_calls_push(&ctx->result->calls, ctx->arena, xcall);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
 

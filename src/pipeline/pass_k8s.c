@@ -44,9 +44,7 @@ static char *k8s_read_file(const char *path, int *out_len) {
         return NULL;
     }
 
-    /* +pad: tree-sitter lexer lookahead reads past EOF; keep it in-bounds */
-    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
-    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
+    char *buf = malloc(size + SKIP_ONE);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -57,7 +55,7 @@ static char *k8s_read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
+    buf[nread] = '\0';
     *out_len = (int)nread;
     return buf;
 }
@@ -109,7 +107,7 @@ static void handle_kustomize(cbm_pipeline_ctx_t *ctx, const char *path, const ch
         char *source = k8s_read_file(path, &src_len);
         if (source) {
             res = cbm_extract_file(source, src_len, CBM_LANG_KUSTOMIZE, ctx->project_name, rel_path,
-                                   CBM_EXTRACT_BUDGET, NULL, NULL);
+                                   CBM_EXTRACT_BUDGET, NULL, NULL, NULL, NULL);
             free(source);
             allocated = true;
         }
@@ -157,7 +155,7 @@ static void handle_k8s_manifest(cbm_pipeline_ctx_t *ctx, const char *path, const
     int resource_count = 0;
 
     CBMFileResult *res = cbm_extract_file(source, src_len, CBM_LANG_K8S, ctx->project_name,
-                                          rel_path, CBM_EXTRACT_BUDGET, NULL, NULL);
+                                          rel_path, CBM_EXTRACT_BUDGET, NULL, NULL, NULL, NULL);
     if (!res) {
         return;
     }

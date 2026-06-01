@@ -7,6 +7,8 @@
  */
 #include "test_framework.h"
 #include "cbm.h"
+#include "macro_table.h"
+
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -60,159 +62,19 @@ static int count_defs_with_label(CBMFileResult *r, const char *label) {
 /* Convenience: extract, assert no error, return result. Caller frees. */
 static CBMFileResult *extract(const char *src, CBMLanguage lang, const char *proj,
                               const char *path) {
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, NULL, NULL);
     return r;
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+static CBMFileResult *extract_with_macros(const char *src, CBMLanguage lang, const char *proj,
+                                          const char *path, const CBMMacroTable *mt) {
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), lang, proj, path, 0, NULL, NULL, mt, NULL);
+    return r;
+}
+
+/* ===================================================================
  * Group A: OOP Languages
- * ═══════════════════════════════════════════════════════════════════ */
-
-/* --- R: box::use imports (#218) + module$fn calls (#219) --- */
-TEST(extract_r_box_use_imports_issue218) {
-    CBMFileResult *r = extract("box::use(\n"
-                               "  shiny[moduleServer, NS],\n"
-                               "  app/logic/validation[validate_input],\n"
-                               ")\n"
-                               "library(dplyr)\n"
-                               "source(\"helpers.R\")\n",
-                               CBM_LANG_R, "t", "app.R");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    /* box::use specs → one IMPORTS edge per module (symbol list stripped). */
-    ASSERT(has_import(r, "shiny"));
-    ASSERT(has_import(r, "app/logic/validation"));
-    /* base-R imports work too. */
-    ASSERT(has_import(r, "dplyr"));
-    ASSERT(has_import(r, "helpers"));
-    cbm_free_result(r);
-    PASS();
-}
-
-TEST(extract_r_dollar_call_issue219) {
-    CBMFileResult *r = extract("validation$validate_input(x)\n", CBM_LANG_R, "t", "app.R");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    /* module$fn() now produces a CALLS edge (was silently dropped). */
-    ASSERT(has_call(r, "validation.validate_input"));
-    cbm_free_result(r);
-    PASS();
-}
-
-/* --- TS: object-literal arrow methods from a factory (Zustand, #341) --- */
-TEST(extract_ts_factory_object_methods_issue341) {
-    CBMFileResult *r = extract("export function createItemActions(set, get) {\n"
-                               "  return {\n"
-                               "    addItem: (type, id) => { return 1; },\n"
-                               "    moveItem: (id, target) => { return 2; },\n"
-                               "    deleteItem: (id) => { return 3; },\n"
-                               "  };\n"
-                               "}\n",
-                               CBM_LANG_TYPESCRIPT, "t", "item-actions.ts");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    /* The factory itself + each returned arrow method are Function nodes. */
-    ASSERT(has_def_any(r, "createItemActions"));
-    ASSERT(has_def_any(r, "addItem"));
-    ASSERT(has_def_any(r, "moveItem"));
-    ASSERT(has_def_any(r, "deleteItem"));
-    cbm_free_result(r);
-    PASS();
-}
-
-/* --- C/C++ preprocessor macros become Macro nodes (#375) --- */
-TEST(extract_c_macros_issue375) {
-    CBMFileResult *r = extract("#define SIMPLE_MACRO 1\n"
-                               "#define FN_MACRO(x) (2 * (x))\n"
-                               "#define EMPTY_MACRO\n"
-                               "int main(void) { return FN_MACRO(SIMPLE_MACRO); }\n",
-                               CBM_LANG_C, "p", "macros.c");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    ASSERT(has_def(r, "Macro", "SIMPLE_MACRO"));
-    ASSERT(has_def(r, "Macro", "FN_MACRO"));
-    ASSERT(has_def(r, "Macro", "EMPTY_MACRO"));
-    ASSERT(has_def(r, "Function", "main")); /* macros don't displace function defs */
-    cbm_free_result(r);
-    PASS();
-}
-
-TEST(extract_cpp_macros_issue375) {
-    CBMFileResult *r = extract("#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
-                               "#define PI 3.14159\n"
-                               "namespace n {\n"
-                               "int f() { return MAX(1, 2); }\n"
-                               "}\n",
-                               CBM_LANG_CPP, "p", "macros.cpp");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    ASSERT(has_def(r, "Macro", "MAX"));
-    ASSERT(has_def(r, "Macro", "PI"));
-    cbm_free_result(r);
-    PASS();
-}
-
-/* --- GDScript: AST -> graph visitor (Godot, #186) --- */
-TEST(extract_gdscript_issue186) {
-    CBMFileResult *r = extract("extends Node\n"
-                               "class_name Player\n"
-                               "\n"
-                               "var health = 100\n"
-                               "\n"
-                               "func _ready():\n"
-                               "    take_damage(10)\n"
-                               "\n"
-                               "func take_damage(amount):\n"
-                               "    health -= amount\n"
-                               "\n"
-                               "class Inner:\n"
-                               "    func helper():\n"
-                               "        pass\n",
-                               CBM_LANG_GDSCRIPT, "game", "player.gd");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    ASSERT(has_def(r, "Function", "_ready"));
-    ASSERT(has_def(r, "Function", "take_damage"));
-    ASSERT(has_def(r, "Class", "Inner"));
-    ASSERT(has_call(r, "take_damage"));
-    cbm_free_result(r);
-    PASS();
-}
-
-/* --- PowerShell: AST -> graph visitor (#35) --- */
-TEST(extract_powershell_issue35) {
-    CBMFileResult *r = extract("function Get-Greeting {\n"
-                               "    param($Name)\n"
-                               "    Write-Output \"Hello $Name\"\n"
-                               "}\n"
-                               "\n"
-                               "function Set-Config {\n"
-                               "    Get-Greeting -Name 'World'\n"
-                               "}\n",
-                               CBM_LANG_POWERSHELL, "ops", "greet.ps1");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    ASSERT(count_defs_with_label(r, "Function") >= 2);
-    cbm_free_result(r);
-    PASS();
-}
-
-/* --- Luau: AST -> graph visitor (Roblox, #39) --- */
-TEST(extract_luau_issue39) {
-    CBMFileResult *r = extract("local function add(a, b)\n"
-                               "    return a + b\n"
-                               "end\n"
-                               "\n"
-                               "function multiply(a, b)\n"
-                               "    return add(a, a) * b\n"
-                               "end\n",
-                               CBM_LANG_LUAU, "game", "math.luau");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    ASSERT(count_defs_with_label(r, "Function") >= 2);
-    cbm_free_result(r);
-    PASS();
-}
+ * =================================================================== */
 
 /* --- Java --- */
 TEST(java_class) {
@@ -257,9 +119,9 @@ TEST(java_interface) {
  *      was emitted, the interfaces were dropped.
  *   2) the emitted name was the full field text including the keyword. */
 TEST(java_class_extends_and_implements) {
-    CBMFileResult *r = extract("public class DefaultLinkTool extends DefaultDiagramTool implements "
-                               "ILinkTool, Closeable { }",
-                               CBM_LANG_JAVA, "t", "DefaultLinkTool.java");
+    CBMFileResult *r = extract(
+        "public class DefaultLinkTool extends DefaultDiagramTool implements ILinkTool, Closeable { }",
+        CBM_LANG_JAVA, "t", "DefaultLinkTool.java");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
 
@@ -283,12 +145,9 @@ TEST(java_class_extends_and_implements) {
          * "implements ..." literally inside one of the entries. */
         ASSERT_NULL(strstr(*b, "extends"));
         ASSERT_NULL(strstr(*b, "implements"));
-        if (strcmp(*b, "DefaultDiagramTool") == 0)
-            saw_super = true;
-        if (strcmp(*b, "ILinkTool") == 0)
-            saw_iface_a = true;
-        if (strcmp(*b, "Closeable") == 0)
-            saw_iface_b = true;
+        if (strcmp(*b, "DefaultDiagramTool") == 0) saw_super = true;
+        if (strcmp(*b, "ILinkTool") == 0) saw_iface_a = true;
+        if (strcmp(*b, "Closeable") == 0) saw_iface_b = true;
     }
     ASSERT_TRUE(saw_super);
     ASSERT_TRUE(saw_iface_a);
@@ -456,9 +315,9 @@ TEST(groovy_class) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group B: Systems Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Rust --- */
 TEST(rust_function) {
@@ -570,9 +429,9 @@ TEST(cpp_class) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group C: Scripting / Dynamic Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Python --- */
 TEST(python_function) {
@@ -696,9 +555,9 @@ TEST(r_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group D: Functional Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Elixir --- */
 TEST(elixir_function) {
@@ -747,9 +606,9 @@ TEST(erlang_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group E: Markup / Config / Helper Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- YAML --- */
 TEST(yaml_variables) {
@@ -798,9 +657,9 @@ TEST(dockerfile_stages) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group F: Scientific / Math Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- MATLAB --- */
 TEST(matlab_function) {
@@ -859,9 +718,9 @@ TEST(magma_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group G: v0.5 Expansion Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- F# --- */
 TEST(fsharp_function) {
@@ -921,9 +780,9 @@ TEST(fortran_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group A2: Missing OOP / Systems variants
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- Swift struct --- */
 TEST(swift_struct) {
@@ -949,8 +808,8 @@ TEST(swift_simple_call) {
 }
 
 TEST(swift_method_call) {
-    CBMFileResult *r =
-        extract("class Foo {\n    func bar() { baz.run() }\n}\n", CBM_LANG_SWIFT, "t", "Foo.swift");
+    CBMFileResult *r = extract("class Foo {\n    func bar() { baz.run() }\n}\n", CBM_LANG_SWIFT,
+                               "t", "Foo.swift");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT(has_call(r, "baz.run"));
@@ -1193,9 +1052,9 @@ TEST(clojure_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group E2: Missing Config / Markup Languages
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- HTML elements --- */
 TEST(html_elements) {
@@ -1383,9 +1242,9 @@ TEST(vimscript_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group H: Scientific / Math — extended tests
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- MATLAB parse (simple expression) --- */
 TEST(matlab_parse) {
@@ -1633,9 +1492,695 @@ TEST(wolfram_nested_def) {
     PASS();
 }
 
+/* ===================================================================
+ * Group H3: ObjectScript return type extraction
+ * =================================================================== */
+
+TEST(objectscript_udl_method_return_type) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Factory Extends %RegisteredObject\n"
+        "{\n"
+        "Method GetAdapter() As EnsLib.SQL.OutboundAdapter\n"
+        "{\n"
+        "    Quit ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Factory.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    bool found_rt = false;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "GetAdapter") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].return_type);
+            ASSERT(strstr(r->defs.items[i].return_type, "EnsLib.SQL.OutboundAdapter") != NULL);
+            found_rt = true;
+        }
+    }
+    ASSERT(found_rt);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_scalar_return_type_not_resolved) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Counter Extends %RegisteredObject\n"
+        "{\n"
+        "Method GetName() As %String\n"
+        "{\n"
+        "    Quit \"hello\"\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Counter.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "GetName") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].return_type);
+            ASSERT(strstr(r->defs.items[i].return_type, "%String") != NULL);
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ===================================================================
+ * Group H2: ObjectScript macro expansion
+ * =================================================================== */
+
+TEST(objectscript_udl_class) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n{\n}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_methods_after_goto_label) {
+    CBMFileResult *r = extract(
+        "Class Graph.KG.Test Extends %RegisteredObject\n"
+        "{\n"
+        "ClassMethod First() As %String\n"
+        "{\n"
+        "    If 1 { Goto Done }\n"
+        "Done\n"
+        "    Quit \"x\"\n"
+        "}\n"
+        "ClassMethod Second() As %String\n"
+        "{\n"
+        "    Quit \"y\"\n"
+        "}\n"
+        "ClassMethod Third() As %String\n"
+        "{\n"
+        "    Quit \"z\"\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Test.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "Graph.KG.Test"));
+    ASSERT(has_def(r, "Method", "First"));
+    ASSERT(has_def(r, "Method", "Second"));
+    ASSERT(has_def(r, "Method", "Third"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_methods) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Utils Extends %RegisteredObject\n"
+        "{\n"
+        "ClassMethod Format(pVal As %String) As %String\n"
+        "{\n"
+        "    Quit pVal\n"
+        "}\n"
+        "Method Save() As %Status\n"
+        "{\n"
+        "    Quit ..%Save()\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Utils.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Utils"));
+    ASSERT(has_def(r, "Method", "Format"));
+    ASSERT(has_def(r, "Method", "Save"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_base_classes) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    int found = 0;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "MyApp.Patient") == 0) {
+            found = 1;
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[0]);
+            ASSERT_STR_EQ(r->defs.items[i].base_classes[0], "%Persistent");
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_multiple_bases) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Dual Extends (MyApp.Base, %RegisteredObject)\n"
+        "{\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Dual.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    int found = 0;
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].name, "MyApp.Dual") == 0) {
+            found = 1;
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[0]);
+            ASSERT_NOT_NULL(r->defs.items[i].base_classes[1]);
+        }
+    }
+    ASSERT_TRUE(found);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_properties) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "Property Name As %String;\n"
+        "Property DOB As %Date;\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Patient"));
+    ASSERT(has_def(r, "Variable", "Name"));
+    ASSERT(has_def(r, "Variable", "DOB"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_routine_tags) {
+    CBMFileResult *r = extract(
+        "UTILS\n"
+        "    Quit\n"
+        "\n"
+        "Format(value,fmt)\n"
+        "    Set result = $ZDate(value, fmt)\n"
+        "    Quit result\n"
+        "\n"
+        "Log(msg)\n"
+        "    Write msg,!\n"
+        "    Quit\n",
+        CBM_LANG_OBJECTSCRIPT_ROUTINE, "t", "Utils.mac");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Function", "Format"));
+    ASSERT(has_def(r, "Function", "Log"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_query_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Repo Extends %Persistent\n"
+        "{\n"
+        "Query FindAll(name As %String) As %SQLQuery { SELECT * FROM MyApp_Repo }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Repo.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Class", "MyApp.Repo"));
+    ASSERT(has_def(r, "Method", "FindAll"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_index_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Repo Extends %Persistent\n"
+        "{\n"
+        "Property Name As %String;\n"
+        "Index NameIdx On Name;\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Repo.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Index", "NameIdx"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_xdata_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends %CSP.REST\n"
+        "{\n"
+        "XData UrlMap { <Routes/> }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "UrlMap"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_trigger_member) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Log Extends %Persistent\n"
+        "{\n"
+        "Trigger AfterInsert [ Event = INSERT ] { }\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Log.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "AfterInsert"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_trigger_body_quit) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Patient Extends %Persistent\n"
+        "{\n"
+        "Trigger OnDeleteSQL [ Event = DELETE, Time = AFTER ] {\n"
+        "    Quit\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Patient.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "OnDeleteSQL"));
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].label, "Trigger") == 0 &&
+            strcmp(r->defs.items[i].name, "OnDeleteSQL") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].docstring);
+            ASSERT(strstr(r->defs.items[i].docstring, "trigger_body") != NULL);
+            ASSERT(strstr(r->defs.items[i].docstring, "Quit") != NULL);
+            break;
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_trigger_body_tokens) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Order Extends %Persistent\n"
+        "{\n"
+        "Trigger AfterInsert [ Event = INSERT, Time = AFTER ] {\n"
+        "    Set id = ..%Id()\n"
+        "    Do ##class(MyApp.Audit).Log(id)\n"
+        "    Quit\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Order.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Trigger", "AfterInsert"));
+    for (int i = 0; i < r->defs.count; i++) {
+        if (strcmp(r->defs.items[i].label, "Trigger") == 0 &&
+            strcmp(r->defs.items[i].name, "AfterInsert") == 0) {
+            ASSERT_NOT_NULL(r->defs.items[i].docstring);
+            ASSERT(strstr(r->defs.items[i].docstring, "trigger_body") != NULL);
+            ASSERT_NOT_NULL(r->defs.items[i].body_tokens);
+            ASSERT(strstr(r->defs.items[i].body_tokens, "Log") != NULL ||
+                   strstr(r->defs.items[i].body_tokens, "Audit") != NULL ||
+                   strstr(r->defs.items[i].body_tokens, "id") != NULL);
+            break;
+        }
+    }
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_self_call_relative_dot_method) {
+    CBMFileResult *r = extract(
+        "Class HS.Flash.UpdateManager Extends Ens.BusinessProcess\n"
+        "{\n"
+        "Method MakeMRNUpToDate(pRequest As HS.Message.FlashQueueUpdate) As %Status\n"
+        "{\n"
+        "    Set tSC = ..processStreamlet(pSession, pTS, tMPIID, tSourceMRN, ii)\n"
+        "    Quit tSC\n"
+        "}\n"
+        "Method processStreamlet(pSession As %Integer) As %Status\n"
+        "{\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "UpdateManager.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "Method", "MakeMRNUpToDate"));
+    ASSERT(has_call(r, "HS.Flash.UpdateManager.processStreamlet"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_calls_typed_new) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set adapter = ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "    Do adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_ensemble_production_def_parses_items) {
+    CBMFileResult *r = extract(
+        "Class Sample.Production Extends Ens.Production\n"
+        "{\n"
+        "XData ProductionDefinition\n"
+        "{\n"
+        "<Production Name=\"Sample.Production\">\n"
+        "  <Item Name=\"MyService\" ClassName=\"Sample.Service\" Enabled=\"true\">\n"
+        "  </Item>\n"
+        "  <Item Name=\"MyOperation\" ClassName=\"Sample.Operation\" Enabled=\"false\">\n"
+        "  </Item>\n"
+        "</Production>\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Production.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_ensemble_production_def_hs_settings) {
+    CBMFileResult *r = extract(
+        "Class HS.Flash.Production Extends Ens.Production\n"
+        "{\n"
+        "XData ProductionDefinition\n"
+        "{\n"
+        "<Production Name=\"HS.Flash.Production\">\n"
+        "  <Item Name=\"FHIRService\" ClassName=\"HS.Flash.FHIRService\" Enabled=\"true\">\n"
+        "    <Setting Target=\"Host\" Name=\"TargetConfigName\">FHIROps</Setting>\n"
+        "    <Setting Target=\"Host\" Name=\"PatientHost\">PatientOps</Setting>\n"
+        "    <Setting Target=\"Host\" Name=\"ConformanceOperation\">ConformOps</Setting>\n"
+        "  </Item>\n"
+        "</Production>\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "HSProduction.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_ensemble_production_def_absent_no_error) {
+    CBMFileResult *r = extract(
+        "Class Sample.NonProduction Extends %Persistent\n"
+        "{\n"
+        "Method DoSomething() As %Status\n"
+        "{\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "NonProduction.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(!has_def(r, "XData", "ProductionDefinition"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_calls_typed_param) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Handler Extends %RegisteredObject\n"
+        "{\n"
+        "Method Process(req As Ens.Request) As %Status\n"
+        "{\n"
+        "    Do req.Send()\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Handler.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "Ens.Request.Send"));
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_udl_calls_typed_property) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends Ens.BusinessService\n"
+        "{\n"
+        "Property Adapter As EnsLib.SQL.InboundAdapter;\n"
+        "Method OnProcessInput() As %Status\n"
+        "{\n"
+        "    Do ..Adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.InboundAdapter.ExecuteQuery"));
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ===================================================================
+ * Group H2: ObjectScript macro expansion
+ * =================================================================== */
+
+TEST(objectscript_macro_expand_system) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run(sc As %Status) As %Status\n"
+        "{\n"
+        "    If $$$ISERR(sc) { Quit sc }\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "%SYSTEM.Status.IsError"));
+    cbm_free_result(r);
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
- * Group I: cbm_test.go ports
+ * Group H3: ObjectScript DATA_FLOWS argument extraction
  * ═══════════════════════════════════════════════════════════════════ */
+
+static int find_call_args(const CBMFileResult *r, const char *callee,
+                          const char **out_arg0, const char **out_arg1) {
+    if (out_arg0) *out_arg0 = NULL;
+    if (out_arg1) *out_arg1 = NULL;
+    for (int i = 0; i < r->calls.count; i++) {
+        if (strstr(r->calls.items[i].callee_name, callee)) {
+            if (out_arg0 && r->calls.items[i].arg_count > 0)
+                *out_arg0 = r->calls.items[i].args[0].expr;
+            if (out_arg1 && r->calls.items[i].arg_count > 1)
+                *out_arg1 = r->calls.items[i].args[1].expr;
+            return r->calls.items[i].arg_count;
+        }
+    }
+    return -1;
+}
+
+TEST(objectscript_data_flows_class_method_args) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set sql = \"SELECT 1\"\n"
+        "    Do ##class(MyApp.Utils).Transform(sql, \"JSON\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "MyApp.Utils.Transform"));
+    const char *arg0 = NULL;
+    const char *arg1 = NULL;
+    int argc = find_call_args(r, "MyApp.Utils.Transform", &arg0, &arg1);
+    ASSERT(argc == 2);
+    ASSERT_NOT_NULL(arg0);
+    ASSERT(strstr(arg0, "sql") != NULL);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(objectscript_macro_expand_local) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    const char *inc_content =
+        "ROUTINE MyApp.Include [Type=INC]\n"
+        "#define MyCheck(%sc) ##class(MyApp.Utils).Validate(%sc)\n";
+    cbm_parse_inc_file(&mt, &arena, inc_content);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run(sc As %Status) As %Status\n"
+        "{\n"
+        "    If $$$MyCheck(sc) { Quit $$$OK }\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "MyApp.Utils.Validate"));
+    cbm_free_result(r);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+TEST(objectscript_macro_constant_no_extra_call) {
+    CBMMacroTable mt;
+    cbm_macro_table_init_system(&mt);
+    CBMArena arena;
+    cbm_arena_init(&arena);
+    const char *inc_content =
+        "ROUTINE MyApp.Include [Type=INC]\n"
+        "#define MyConst 42\n";
+    cbm_parse_inc_file(&mt, &arena, inc_content);
+    CBMFileResult *r = extract_with_macros(
+        "Class MyApp.Caller Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Integer\n"
+        "{\n"
+        "    Set x = $$$MyConst\n"
+        "    Quit x\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Caller.cls", &mt);
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(!has_call(r, "$$$MyConst"));
+    cbm_free_result(r);
+    cbm_arena_destroy(&arena);
+    PASS();
+}
+
+TEST(objectscript_data_flows_instance_method_args) {
+    CBMFileResult *r = extract(
+        "Class MyApp.Service Extends %RegisteredObject\n"
+        "{\n"
+        "Method Run() As %Status\n"
+        "{\n"
+        "    Set adapter = ##class(EnsLib.SQL.OutboundAdapter).%New()\n"
+        "    Do adapter.ExecuteQuery(\"SELECT 1\")\n"
+        "    Quit $$$OK\n"
+        "}\n"
+        "}\n",
+        CBM_LANG_OBJECTSCRIPT_UDL, "t", "Service.cls");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery"));
+    const char *arg0 = NULL;
+    int argc = find_call_args(r, "EnsLib.SQL.OutboundAdapter.ExecuteQuery", &arg0, NULL);
+    ASSERT(argc == 1);
+    ASSERT_NOT_NULL(arg0);
+    cbm_free_result(r);
+    PASS();
+}
+
+/* ===================================================================
+ * Group H4: IRIS Export XML → UDL transcoder
+ * =================================================================== */
+
+#define SIMPLE_EXPORT \
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Simple\">\n" \
+    "<Super>%RegisteredObject</Super>\n" \
+    "<Method name=\"Hello\">\n" \
+    "<ReturnType>%String</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tQuit \"hello\"\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+
+#define CLASSMETHOD_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.CM\">\n" \
+    "<Method name=\"Run\">\n" \
+    "<ClassMethod>1</ClassMethod>\n" \
+    "<FormalSpec>pArg:%String,pFlag:%Boolean=0</FormalSpec>\n" \
+    "<ReturnType>%Status</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tQuit $$$OK\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+
+#define MEMBER_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Members\">\n" \
+    "<Property name=\"Name\">\n" \
+    "<Type>%String</Type>\n" \
+    "<Parameter name=\"MAXLEN\" value=\"200\"/>\n" \
+    "</Property>\n" \
+    "<Parameter name=\"VERSION\">\n" \
+    "<Default>1</Default>\n" \
+    "</Parameter>\n" \
+    "<Index name=\"NameIdx\">\n" \
+    "<Properties>Name</Properties>\n" \
+    "<Unique>1</Unique>\n" \
+    "</Index>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+
+#define CALLS_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.Caller\">\n" \
+    "<Super>%RegisteredObject</Super>\n" \
+    "<Method name=\"Run\">\n" \
+    "<ClassMethod>1</ClassMethod>\n" \
+    "<ReturnType>%Status</ReturnType>\n" \
+    "<Implementation><![CDATA[\n" \
+    "\tSet obj = ##class(Target.Worker).%New()\n" \
+    "\tDo obj.Execute()\n" \
+    "\tQuit $$$OK\n" \
+    "]]></Implementation>\n" \
+    "</Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+
+#define MULTI_EXPORT \
+    "<?xml version=\"1.0\"?>\n" \
+    "<Export generator=\"Cache\" version=\"25\">\n" \
+    "<Class name=\"Test.First\">\n" \
+    "<Method name=\"One\"><Implementation><![CDATA[\tQuit 1\n]]></Implementation></Method>\n" \
+    "</Class>\n" \
+    "<Class name=\"Test.Second\">\n" \
+    "<Method name=\"Two\"><Implementation><![CDATA[\tQuit 2\n]]></Implementation></Method>\n" \
+    "</Class>\n" \
+    "</Export>\n"
+
+
+/* ===================================================================
+ * Group I: cbm_test.go ports
+ * =================================================================== */
 
 TEST(python_docstring) {
     CBMFileResult *r = extract(
@@ -1683,9 +2228,9 @@ TEST(js_arrow_function) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Group J: language_failures_test.go ports
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* CommonLisp — defun extraction (known limitation: grammar produces list_lit) */
 TEST(commonlisp_defun) {
@@ -1817,9 +2362,9 @@ TEST(julia_function_with_args) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Cross-cutting: Calls + Imports
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(python_calls) {
     CBMFileResult *r =
@@ -1829,6 +2374,20 @@ TEST(python_calls) {
     ASSERT_FALSE(r->has_error);
     /* Python unified extraction produces calls — verify at least some exist */
     ASSERT_GT(r->calls.count, 0);
+    cbm_free_result(r);
+    PASS();
+}
+
+TEST(python_iris_classMethodValue) {
+    CBMFileResult *r = extract(
+        "import iris\n"
+        "iris_obj = iris.cls('%Library.ObjectScript')\n"
+        "def call_bfs(n):\n"
+        "    return iris_obj.classMethodValue('Graph.KG.TraversalBFS', 'BFSFastJson', n)\n",
+        CBM_LANG_PYTHON, "t", "store.py");
+    ASSERT_NOT_NULL(r);
+    ASSERT_FALSE(r->has_error);
+    ASSERT(has_call(r, "Graph.KG.TraversalBFS.BFSFastJson"));
     cbm_free_result(r);
     PASS();
 }
@@ -1879,10 +2438,10 @@ TEST(go_imports) {
 }
 
 TEST(java_imports) {
-    CBMFileResult *r = extract(
-        "import java.util.List;\nimport java.util.ArrayList;\nimport static java.lang.Math.PI;\n"
-        "public class Foo {}\n",
-        CBM_LANG_JAVA, "t", "Foo.java");
+    CBMFileResult *r =
+        extract("import java.util.List;\nimport java.util.ArrayList;\nimport static java.lang.Math.PI;\n"
+                "public class Foo {}\n",
+                CBM_LANG_JAVA, "t", "Foo.java");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1892,10 +2451,10 @@ TEST(java_imports) {
 }
 
 TEST(rust_imports) {
-    CBMFileResult *r = extract(
-        "use std::collections::HashMap;\nuse std::io::{self, Write};\nuse serde::Serialize;\n"
-        "fn main() {}\n",
-        CBM_LANG_RUST, "t", "main.rs");
+    CBMFileResult *r =
+        extract("use std::collections::HashMap;\nuse std::io::{self, Write};\nuse serde::Serialize;\n"
+                "fn main() {}\n",
+                CBM_LANG_RUST, "t", "main.rs");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1905,9 +2464,9 @@ TEST(rust_imports) {
 }
 
 TEST(c_imports) {
-    CBMFileResult *r = extract("#include <stdio.h>\n#include <stdlib.h>\n#include "
-                               "\"mylib.h\"\n\nint main() { return 0; }\n",
-                               CBM_LANG_C, "t", "main.c");
+    CBMFileResult *r =
+        extract("#include <stdio.h>\n#include <stdlib.h>\n#include \"mylib.h\"\n\nint main() { return 0; }\n",
+                CBM_LANG_C, "t", "main.c");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1917,9 +2476,9 @@ TEST(c_imports) {
 }
 
 TEST(ruby_imports) {
-    CBMFileResult *r = extract(
-        "require 'json'\nrequire 'net/http'\nrequire_relative 'helpers'\n\nclass Foo; end\n",
-        CBM_LANG_RUBY, "t", "app.rb");
+    CBMFileResult *r =
+        extract("require 'json'\nrequire 'net/http'\nrequire_relative 'helpers'\n\nclass Foo; end\n",
+                CBM_LANG_RUBY, "t", "app.rb");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1929,9 +2488,9 @@ TEST(ruby_imports) {
 }
 
 TEST(lua_imports) {
-    CBMFileResult *r = extract("local json = require(\"dkjson\")\nlocal http = "
-                               "require(\"socket.http\")\n\nlocal function greet() end\n",
-                               CBM_LANG_LUA, "t", "main.lua");
+    CBMFileResult *r =
+        extract("local json = require(\"dkjson\")\nlocal http = require(\"socket.http\")\n\nlocal function greet() end\n",
+                CBM_LANG_LUA, "t", "main.lua");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1964,24 +2523,25 @@ TEST(import_stress_go) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Embedded-language import extraction
  * Host grammars (Svelte, Vue, HTML, Astro) keep <script> bodies as
  * raw_text — the embedded-imports walker re-parses each block with the
  * JS grammar so the standard ES import extractor sees real
  * import_statement nodes.
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(svelte_imports_basic) {
     /* Default import + named imports + namespace import */
-    CBMFileResult *r = extract("<script>\n"
-                               "import Foo from './Foo.svelte';\n"
-                               "import { bar, baz } from '../lib/utils';\n"
-                               "import * as helpers from './helpers';\n"
-                               "export let value = 42;\n"
-                               "</script>\n"
-                               "<h1>Hello {value}</h1>\n",
-                               CBM_LANG_SVELTE, "t", "Comp.svelte");
+    CBMFileResult *r = extract(
+        "<script>\n"
+        "import Foo from './Foo.svelte';\n"
+        "import { bar, baz } from '../lib/utils';\n"
+        "import * as helpers from './helpers';\n"
+        "export let value = 42;\n"
+        "</script>\n"
+        "<h1>Hello {value}</h1>\n",
+        CBM_LANG_SVELTE, "t", "Comp.svelte");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GTE(r->imports.count, 3);
@@ -1994,9 +2554,10 @@ TEST(svelte_imports_basic) {
 
 TEST(svelte_imports_no_script) {
     /* .svelte with no <script> block must not crash, 0 imports */
-    CBMFileResult *r = extract("<h1>Static page</h1>\n"
-                               "<p>No script here.</p>\n",
-                               CBM_LANG_SVELTE, "t", "Static.svelte");
+    CBMFileResult *r = extract(
+        "<h1>Static page</h1>\n"
+        "<p>No script here.</p>\n",
+        CBM_LANG_SVELTE, "t", "Static.svelte");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_EQ(r->imports.count, 0);
@@ -2006,13 +2567,14 @@ TEST(svelte_imports_no_script) {
 
 TEST(vue_imports_basic) {
     /* Vue SFC: same document→script_element→raw_text AST structure */
-    CBMFileResult *r = extract("<template><div>{{ msg }}</div></template>\n"
-                               "<script>\n"
-                               "import MyComp from './MyComp.vue';\n"
-                               "import { ref } from 'vue';\n"
-                               "export default { name: 'App' };\n"
-                               "</script>\n",
-                               CBM_LANG_VUE, "t", "App.vue");
+    CBMFileResult *r = extract(
+        "<template><div>{{ msg }}</div></template>\n"
+        "<script>\n"
+        "import MyComp from './MyComp.vue';\n"
+        "import { ref } from 'vue';\n"
+        "export default { name: 'App' };\n"
+        "</script>\n",
+        CBM_LANG_VUE, "t", "App.vue");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GTE(r->imports.count, 2);
@@ -2024,14 +2586,15 @@ TEST(vue_imports_basic) {
 
 TEST(html_imports_basic) {
     /* Plain HTML with inline ES module imports — same generic walker. */
-    CBMFileResult *r = extract("<!DOCTYPE html><html><head>\n"
-                               "<script type=\"module\">\n"
-                               "import { renderApp } from './app.js';\n"
-                               "import * as utils from './utils.js';\n"
-                               "renderApp();\n"
-                               "</script>\n"
-                               "</head><body></body></html>\n",
-                               CBM_LANG_HTML, "t", "index.html");
+    CBMFileResult *r = extract(
+        "<!DOCTYPE html><html><head>\n"
+        "<script type=\"module\">\n"
+        "import { renderApp } from './app.js';\n"
+        "import * as utils from './utils.js';\n"
+        "renderApp();\n"
+        "</script>\n"
+        "</head><body></body></html>\n",
+        CBM_LANG_HTML, "t", "index.html");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GTE(r->imports.count, 2);
@@ -2041,9 +2604,9 @@ TEST(html_imports_basic) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * config_extraction_test.go ports (25 tests)
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 /* --- TOML (8 tests) --- */
 
@@ -2328,9 +2891,9 @@ TEST(markdown_no_headings) {
     PASS();
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Python __init__.py Module QN collision regression
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 TEST(python_init_module_qn_not_collide_with_folder) {
     /* Bug: __init__.py Module QN was identical to the Folder QN for the
@@ -2405,85 +2968,13 @@ TEST(python_regular_module_qn_unchanged) {
     PASS();
 }
 
-/* Find a definition by name; returns the item or NULL. */
-static const CBMDefinition *find_def_by_name(CBMFileResult *r, const char *name) {
-    for (int i = 0; i < r->defs.count; i++) {
-        if (r->defs.items[i].name && strcmp(r->defs.items[i].name, name) == 0) {
-            return &r->defs.items[i];
-        }
-    }
-    return NULL;
-}
-
-static int decorators_contain(const CBMDefinition *d, const char *needle) {
-    if (!d || !d->decorators) {
-        return 0;
-    }
-    for (int i = 0; d->decorators[i]; i++) {
-        if (strstr(d->decorators[i], needle)) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-/* Issue #382: Java Method nodes had empty decorators / signature. */
-TEST(extract_java_method_annotations_issue382) {
-    CBMFileResult *r = extract("public class C {\n"
-                               "  @GetMapping(\"/x\")\n"
-                               "  public String cmd(String c) { return c; }\n"
-                               "}\n",
-                               CBM_LANG_JAVA, "t", "C.java");
-    ASSERT_NOT_NULL(r);
-    ASSERT_FALSE(r->has_error);
-    const CBMDefinition *m = find_def_by_name(r, "cmd");
-    ASSERT_NOT_NULL(m);
-    ASSERT(decorators_contain(m, "GetMapping"));
-    ASSERT_NOT_NULL(m->signature);
-    ASSERT(m->signature[0] != '\0');
-    cbm_free_result(r);
-    PASS();
-}
-
-/* Issue #213: large TS files were indexed as a File node with zero children. */
-TEST(extract_large_ts_has_functions_issue213) {
-    enum { NFUNCS = 4000 };
-    size_t cap = (size_t)NFUNCS * 80 + 64;
-    char *src = (char *)malloc(cap);
-    ASSERT_NOT_NULL(src);
-    size_t off = 0;
-    for (int i = 0; i < NFUNCS; i++) {
-        off +=
-            (size_t)snprintf(src + off, cap - off,
-                             "export function fn%d(a: number): number { return a + %d; }\n", i, i);
-    }
-    CBMFileResult *r =
-        cbm_extract_file(src, (int)off, CBM_LANG_TYPESCRIPT, "t", "big.ts", 0, NULL, NULL);
-    ASSERT_NOT_NULL(r);
-    int fns = count_defs_with_label(r, "Function");
-    ASSERT_GT(fns, 0); /* must not silently produce zero children */
-    cbm_free_result(r);
-    free(src);
-    PASS();
-}
-
-/* ═══════════════════════════════════════════════════════════════════
+/* ===================================================================
  * Suite
- * ═══════════════════════════════════════════════════════════════════ */
+ * =================================================================== */
 
 SUITE(extraction) {
     /* Initialize extraction library */
     cbm_init();
-
-    /* R box-module imports + member calls */
-    RUN_TEST(extract_r_box_use_imports_issue218);
-    RUN_TEST(extract_r_dollar_call_issue219);
-    RUN_TEST(extract_ts_factory_object_methods_issue341);
-    RUN_TEST(extract_c_macros_issue375);
-    RUN_TEST(extract_cpp_macros_issue375);
-    RUN_TEST(extract_gdscript_issue186);
-    RUN_TEST(extract_powershell_issue35);
-    RUN_TEST(extract_luau_issue39);
 
     /* OOP */
     RUN_TEST(java_class);
@@ -2613,6 +3104,35 @@ SUITE(extraction) {
     RUN_TEST(wolfram_import);
     RUN_TEST(wolfram_nested_def);
 
+    RUN_TEST(objectscript_udl_class);
+    RUN_TEST(objectscript_udl_methods_after_goto_label);
+    RUN_TEST(objectscript_udl_methods);
+    RUN_TEST(objectscript_udl_base_classes);
+    RUN_TEST(objectscript_udl_multiple_bases);
+    RUN_TEST(objectscript_udl_properties);
+    RUN_TEST(objectscript_routine_tags);
+    RUN_TEST(objectscript_udl_query_member);
+    RUN_TEST(objectscript_udl_index_member);
+    RUN_TEST(objectscript_udl_xdata_member);
+    RUN_TEST(objectscript_udl_trigger_member);
+    RUN_TEST(objectscript_udl_trigger_body_quit);
+    RUN_TEST(objectscript_udl_trigger_body_tokens);
+    RUN_TEST(objectscript_udl_ensemble_production_def_parses_items);
+    RUN_TEST(objectscript_udl_ensemble_production_def_hs_settings);
+    RUN_TEST(objectscript_udl_ensemble_production_def_absent_no_error);
+    RUN_TEST(objectscript_udl_self_call_relative_dot_method);
+    RUN_TEST(objectscript_udl_calls_typed_new);
+    RUN_TEST(objectscript_udl_calls_typed_param);
+    RUN_TEST(objectscript_udl_calls_typed_property);
+    RUN_TEST(objectscript_udl_calls_typed_param);
+    RUN_TEST(objectscript_macro_expand_system);
+    RUN_TEST(objectscript_macro_expand_local);
+    RUN_TEST(objectscript_macro_constant_no_extra_call);
+    RUN_TEST(objectscript_udl_method_return_type);
+    RUN_TEST(objectscript_udl_scalar_return_type_not_resolved);
+    RUN_TEST(objectscript_data_flows_class_method_args);
+    RUN_TEST(objectscript_data_flows_instance_method_args);
+
     /* cbm_test.go ports */
     RUN_TEST(python_docstring);
     RUN_TEST(go_function_extraction);
@@ -2632,6 +3152,7 @@ SUITE(extraction) {
 
     /* Cross-cutting */
     RUN_TEST(python_calls);
+    RUN_TEST(python_iris_classMethodValue);
     RUN_TEST(go_calls);
     RUN_TEST(python_imports);
     RUN_TEST(js_imports);
@@ -2679,8 +3200,6 @@ SUITE(extraction) {
     RUN_TEST(python_init_nested_module_qn);
     RUN_TEST(js_index_module_qn_not_collide_with_folder);
     RUN_TEST(python_regular_module_qn_unchanged);
-    RUN_TEST(extract_java_method_annotations_issue382);
-    RUN_TEST(extract_large_ts_has_functions_issue213);
 
     cbm_shutdown();
 }

@@ -659,15 +659,8 @@ static const char **get_module_parents(CBMLanguage lang) {
     }
 }
 
-/* Variant that takes the node's parent DIRECTLY. The callers in
- * extract_defs.c iterate a known parent's children, so they already
- * have the parent — passing it here avoids ts_node_parent(node), which
- * is O(n) per call (tree-sitter nodes carry no parent pointer; the
- * parent is found by rescanning from the root). On a pathologically
- * large file (e.g. a 583k-line generated/fixture file with tens of
- * thousands of top-level statements) the old per-child ts_node_parent
- * made extraction O(n²) and effectively hung. */
-bool cbm_is_module_level_p(TSNode parent, CBMLanguage lang) {
+bool cbm_is_module_level(TSNode node, CBMLanguage lang) {
+    TSNode parent = ts_node_parent(node);
     if (ts_node_is_null(parent)) {
         return false;
     }
@@ -698,13 +691,6 @@ bool cbm_is_module_level_p(TSNode parent, CBMLanguage lang) {
         }
     }
     return false;
-}
-
-/* Back-compat wrapper: computes the parent via ts_node_parent (O(n)).
- * Prefer cbm_is_module_level_p at call sites that already know the
- * parent (the common case — iterating a parent's children). */
-bool cbm_is_module_level(TSNode node, CBMLanguage lang) {
-    return cbm_is_module_level_p(ts_node_parent(node), lang);
 }
 
 // --- FQN computation ---
@@ -760,10 +746,6 @@ static char *append_path_segments(char *out, const char *rel_path, size_t plen, 
 }
 
 char *cbm_fqn_compute(CBMArena *a, const char *project, const char *rel_path, const char *name) {
-    if (!project)
-        project = "";
-    if (!rel_path)
-        rel_path = "";
     size_t proj_len = strlen(project);
     size_t path_len = strlen(rel_path);
     size_t name_len = name ? strlen(name) : 0;
@@ -929,4 +911,35 @@ int cbm_classify_string(const char *str, int len) {
     }
 
     return NOT_FOUND;
+}
+
+bool cbm_is_module_level_p(TSNode parent, CBMLanguage lang) {
+    if (ts_node_is_null(parent)) {
+        return false;
+    }
+    const char *pk = ts_node_type(parent);
+
+    if (lang == CBM_LANG_PYTHON) {
+        return check_script_module_level(parent, pk, "module", "expression_statement");
+    }
+    if (lang == CBM_LANG_JAVASCRIPT || lang == CBM_LANG_TYPESCRIPT || lang == CBM_LANG_TSX) {
+        return check_script_module_level(parent, pk, "program", "export_statement");
+    }
+    if (lang == CBM_LANG_LUA) {
+        return check_script_module_level(parent, pk, "chunk", "assignment_statement");
+    }
+    if (lang == CBM_LANG_YAML) {
+        return strcmp(pk, "document") == 0 || strcmp(pk, "stream") == 0 ||
+               strcmp(pk, "block_mapping") == 0;
+    }
+
+    const char **parents = get_module_parents(lang);
+    if (parents) {
+        for (const char **p = parents; *p; p++) {
+            if (strcmp(pk, *p) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
 }

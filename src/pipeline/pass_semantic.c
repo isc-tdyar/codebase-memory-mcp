@@ -36,9 +36,7 @@ static char *read_file(const char *path, int *out_len) {
         (void)fclose(f);
         return NULL;
     }
-    /* +pad: tree-sitter lexer lookahead reads past EOF; keep it in-bounds */
-    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
-    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
+    char *buf = malloc(size + SKIP_ONE);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -48,7 +46,7 @@ static char *read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
+    buf[nread] = '\0';
     *out_len = (int)nread;
     return buf;
 }
@@ -376,7 +374,7 @@ static CBMFileResult *sem_get_or_extract(cbm_pipeline_ctx_t *ctx, int file_idx,
         return NULL;
     }
     CBMFileResult *r = cbm_extract_file(source, source_len, fi->language, ctx->project_name,
-                                        fi->rel_path, CBM_EXTRACT_BUDGET, NULL, NULL);
+                                        fi->rel_path, CBM_EXTRACT_BUDGET, NULL, NULL, NULL, NULL);
     free(source);
     if (r) {
         *owned = true;

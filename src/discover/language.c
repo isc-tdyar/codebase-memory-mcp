@@ -142,13 +142,13 @@ static const ext_entry_t EXT_TABLE[] = {
     /* Java */
     {".java", CBM_LANG_JAVA},
 
-    /* JavaScript */
-    {".js", CBM_LANG_JAVASCRIPT},
-    {".jsx", CBM_LANG_JAVASCRIPT},
-    {".mjs", CBM_LANG_JAVASCRIPT}, /* ES modules (#197) */
-    {".cjs", CBM_LANG_JAVASCRIPT}, /* CommonJS modules */
+     /* JavaScript */
+     {".js", CBM_LANG_JAVASCRIPT},
+     {".jsx", CBM_LANG_JAVASCRIPT},
+     {".mjs", CBM_LANG_JAVASCRIPT}, /* ES modules (#197) */
+     {".cjs", CBM_LANG_JAVASCRIPT}, /* CommonJS modules */
 
-    /* JSON */
+     /* TypeScript */
     {".json", CBM_LANG_JSON},
 
     /* Julia */
@@ -241,12 +241,12 @@ static const ext_entry_t EXT_TABLE[] = {
     /* TSX */
     {".tsx", CBM_LANG_TSX},
 
-    /* TypeScript */
-    {".ts", CBM_LANG_TYPESCRIPT},
-    {".mts", CBM_LANG_TYPESCRIPT}, /* TS ES modules */
-    {".cts", CBM_LANG_TYPESCRIPT}, /* TS CommonJS modules */
+     /* TypeScript */
+     {".ts", CBM_LANG_TYPESCRIPT},
+     {".mts", CBM_LANG_TYPESCRIPT}, /* TS ES modules */
+     {".cts", CBM_LANG_TYPESCRIPT}, /* TS CommonJS modules */
 
-    /* VimScript */
+     /* VimScript */
     {".vim", CBM_LANG_VIMSCRIPT},
     {".vimrc", CBM_LANG_VIMSCRIPT},
     {"justfile", CBM_LANG_JUST},
@@ -324,6 +324,12 @@ static const ext_entry_t EXT_TABLE[] = {
 
     /* Apex */
     {".cls", CBM_LANG_APEX},
+
+    /* ObjectScript Routine (.mac/.int/.rtn/.inc) — .cls handled by cbm_disambiguate_cls */
+    {".mac", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".int", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".rtn", CBM_LANG_OBJECTSCRIPT_ROUTINE},
+    {".inc", CBM_LANG_OBJECTSCRIPT_ROUTINE},
 
     /* Crystal */
     {".cr", CBM_LANG_CRYSTAL},
@@ -812,6 +818,9 @@ static const char *LANG_NAMES[CBM_LANG_COUNT] = {
     [CBM_LANG_APEX] = "Apex",
     [CBM_LANG_SOQL] = "SOQL",
     [CBM_LANG_SOSL] = "SOSL",
+    [CBM_LANG_OBJECTSCRIPT_UDL]     = "ObjectScript UDL",
+    [CBM_LANG_OBJECTSCRIPT_ROUTINE] = "ObjectScript Routine",
+    [CBM_LANG_OBJECTSCRIPT_EXPORT]  = "ObjectScript Export XML",
 
 };
 
@@ -860,10 +869,10 @@ CBMLanguage cbm_language_for_filename(const char *filename) {
         return CBM_LANG_COUNT;
     }
 
-    /* Probe compound extensions (e.g. ".blade.php") from the first dot toward
-     * the last. Built-in compounds are checked first so e.g. Laravel Blade
-     * templates map to Blade rather than the single-extension fallback (PHP);
-     * user config can still add more (#258). */
+     /* Probe compound extensions (e.g. ".blade.php") from the first dot toward
+      * the last. Built-in compounds are checked first so e.g. Laravel Blade
+      * templates map to Blade rather than the single-extension fallback (PHP);
+      * user config can still add more (#258). */
     static const struct {
         const char *ext;
         CBMLanguage lang;
@@ -993,4 +1002,33 @@ CBMLanguage cbm_disambiguate_m(const char *path) {
     }
 
     return CBM_LANG_MATLAB;
+}
+
+CBMLanguage cbm_disambiguate_cls(const char *path) {
+    if (!path) {
+        return CBM_LANG_APEX;
+    }
+
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        return CBM_LANG_APEX;
+    }
+
+    char buf[CBM_SZ_4K + SKIP_ONE];
+    size_t n = fread(buf, SKIP_ONE, CBM_SZ_4K, f);
+    buf[n] = '\0';
+    (void)fclose(f);
+
+    const char *line = buf;
+    while (*line) {
+        if (strncmp(line, "Class ", 6) == 0 && isupper((unsigned char)line[6])) {
+            return CBM_LANG_OBJECTSCRIPT_UDL;
+        }
+        const char *nl = strchr(line, '\n');
+        if (!nl) {
+            break;
+        }
+        line = nl + SKIP_ONE;
+    }
+    return CBM_LANG_APEX;
 }

@@ -45,12 +45,7 @@ static char *read_file(const char *path, int *out_len) {
         return NULL;
     }
 
-    /* +16 padding: tree-sitter's lexer peeks a few bytes past the final UTF-8
-     * character when computing lookahead, reading beyond the logical end.
-     * Over-allocate and zero the tail so that read stays in-bounds (ASan
-     * flags it as a heap-buffer-overflow otherwise; harmless but real UB). */
-    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
-    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
+    char *buf = malloc(size + SKIP_ONE);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -62,7 +57,7 @@ static char *read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
+    buf[nread] = '\0';
     *out_len = (int)nread;
     return buf;
 }
@@ -175,7 +170,8 @@ static void append_json_str_array(char *buf, size_t bufsize, size_t *pos, const 
 }
 
 /* Build properties JSON for a definition node. */
-static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def) {
+static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
+                             const char *version_tag) {
     int n = snprintf(buf, bufsize,
                      "{\"complexity\":%d,\"lines\":%d,\"is_exported\":%s,"
                      "\"is_test\":%s,\"is_entry_point\":%s",
@@ -187,7 +183,11 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def)
         return;
     }
     size_t pos = (size_t)n;
-    append_json_string(buf, bufsize, &pos, "docstring", def->docstring);
+    bool is_storage_with_meta = def->label && strcmp(def->label, "Storage") == 0 &&
+                                def->docstring && def->docstring[0] == '{';
+    if (!is_storage_with_meta) {
+        append_json_string(buf, bufsize, &pos, "docstring", def->docstring);
+    }
     append_json_string(buf, bufsize, &pos, "signature", def->signature);
     append_json_string(buf, bufsize, &pos, "return_type", def->return_type);
     append_json_string(buf, bufsize, &pos, "parent_class", def->parent_class);
@@ -216,6 +216,26 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def)
         append_json_string(buf, bufsize, &pos, "bt", def->body_tokens);
     }
 
+    /* Version tag for cross-version diff queries */
+    if (version_tag && version_tag[0] && pos + CBM_SZ_256 < bufsize) {
+        append_json_string(buf, bufsize, &pos, "version", version_tag);
+    }
+
+    /* Storage block parsed fields — stored as raw JSON fragment in docstring.
+     * Merge inline instead of escaping: {"extent_size":"...","data_global":"...",...} */
+    if (def->label && strcmp(def->label, "Storage") == 0 &&
+        def->docstring && def->docstring[0] == '{') {
+        const char *frag = def->docstring + 1;
+        size_t flen = strlen(frag);
+        if (flen > 1 && frag[flen-1] == '}') flen--;
+        if (pos + flen + 2 < bufsize) {
+            buf[pos++] = ',';
+            memcpy(buf + pos, frag, flen);
+            pos += flen;
+        }
+        /* Clear docstring so it doesn't get double-appended above */
+    }
+
     if (pos < bufsize - SKIP_ONE) {
         buf[pos] = '}';
         buf[pos + SKIP_ONE] = '\0';
@@ -228,7 +248,7 @@ static void process_def(cbm_pipeline_ctx_t *ctx, const CBMDefinition *def, const
         return;
     }
     char props[CBM_SZ_2K];
-    build_def_props(props, sizeof(props), def);
+    build_def_props(props, sizeof(props), def, ctx->version_tag);
     int64_t node_id = cbm_gbuf_upsert_node(
         ctx->gbuf, def->label ? def->label : "Function", def->name, def->qualified_name,
         def->file_path ? def->file_path : rel, (int)def->start_line, (int)def->end_line, props);
@@ -333,31 +353,11 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
     /* Ensure extraction library is initialized */
     cbm_init();
 
-    /* Defensive: a prior pipeline run may have left a thread-local parser whose
-     * lexer holds pointers into a slab that has since been reclaimed. Drop it
-     * here so the first cbm_extract_file below recreates a fresh parser. */
-    cbm_destroy_thread_parser();
-
     int total_defs = 0;
     int total_calls = 0;
     int total_imports = 0;
     int errors = 0;
 
-    /* Sequential pass must extract all defs (which create Module/Function/...
-     * nodes) BEFORE resolving imports — otherwise a workspace import in the
-     * first file processed can't find the target Module node, because the
-     * target file's defs haven't been extracted yet. Result cache is
-     * required for this two-phase ordering. */
-    CBMFileResult **local_cache = ctx->result_cache;
-    bool owns_local_cache = false;
-    if (!local_cache) {
-        local_cache = (CBMFileResult **)calloc((size_t)file_count, sizeof(CBMFileResult *));
-        owns_local_cache = (local_cache != NULL);
-    }
-
-    /* Phase 1: extract every file and create def-derived nodes (Modules,
-     * Functions, ...) so any file's IMPORTS can resolve against the
-     * complete in-memory graph in Phase 2. */
     for (int i = 0; i < file_count; i++) {
         if (cbm_pipeline_check_cancel(ctx)) {
             return CBM_NOT_FOUND;
@@ -376,9 +376,14 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
         }
 
         /* Extract */
+        if (lang == CBM_LANG_OBJECTSCRIPT_EXPORT) {
+            free(source);
+            continue;
+        }
+
         CBMFileResult *result =
             cbm_extract_file(source, source_len, lang, ctx->project_name, rel, CBM_EXTRACT_BUDGET,
-                             NULL, NULL /* no extra defines or include paths */
+                             NULL, NULL, NULL, NULL
             );
         free(source);
 
@@ -396,42 +401,14 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
         /* Store calls for pass_calls (we save them in the extraction results
          * for now — a future optimization would batch these) */
         total_calls += result->calls.count;
+        total_imports += create_import_edges_for_file(ctx, result, rel);
+        create_channel_edges_for_file(ctx, result, rel);
 
-        if (local_cache) {
-            local_cache[i] = result;
+        /* Cache or free the extraction result */
+        if (ctx->result_cache) {
+            ctx->result_cache[i] = result;
         } else {
-            /* Cache unavailable: imports for this file can still only
-             * resolve to defs already in the graph, but the file's
-             * own defs are now persisted before the lookup. */
-            total_imports += create_import_edges_for_file(ctx, result, rel);
-            create_channel_edges_for_file(ctx, result, rel);
             cbm_free_result(result);
-        }
-    }
-
-    /* Phase 2: now that all extraction results are cached and Module
-     * nodes for every file are in the graph, walk the cache again to
-     * create IMPORTS / channel edges. Imports resolve against the full
-     * project graph. */
-    if (local_cache) {
-        for (int i = 0; i < file_count; i++) {
-            if (cbm_pipeline_check_cancel(ctx)) {
-                break;
-            }
-            CBMFileResult *result = local_cache[i];
-            if (!result) {
-                continue;
-            }
-            total_imports += create_import_edges_for_file(ctx, result, files[i].rel_path);
-            create_channel_edges_for_file(ctx, result, files[i].rel_path);
-        }
-        if (owns_local_cache) {
-            for (int i = 0; i < file_count; i++) {
-                if (local_cache[i]) {
-                    cbm_free_result(local_cache[i]);
-                }
-            }
-            free(local_cache);
         }
     }
 

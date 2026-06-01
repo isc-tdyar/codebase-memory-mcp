@@ -33,9 +33,7 @@ static _Atomic uint64_t total_files = 0;
 /* Use compat.h's cbm_clock_gettime which accepts CLOCK_MONOTONIC (value
  * varies by platform: 1 on Linux/Windows, 6 on macOS). We pass the
  * platform value via the compat.h fallback. */
-#if defined(CLOCK_MONOTONIC)
-#define CBM_CLOCK_MONO CLOCK_MONOTONIC
-#elif defined(__APPLE__)
+#ifdef __APPLE__
 #define CBM_CLOCK_MONO 6
 #else
 #define CBM_CLOCK_MONO 1
@@ -255,7 +253,9 @@ void cbm_shutdown(void) {
 
 CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage language,
                                 const char *project, const char *rel_path, int64_t timeout_micros,
-                                const char **extra_defines, const char **include_paths) {
+                                const char **extra_defines, const char **include_paths,
+                                const CBMMacroTable *macro_table,
+                                const CBMReturnTypeTable *return_type_table) {
     // Allocate result on heap (arena inside for all string data)
     enum { SINGLE = 1 };
     CBMFileResult *result = (CBMFileResult *)calloc(SINGLE, sizeof(CBMFileResult));
@@ -339,6 +339,8 @@ CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage 
         .rel_path = rel_path,
         .module_qn = result->module_qn,
         .root = root,
+        .macro_table = macro_table,
+        .return_type_table = return_type_table,
     };
 
     // Run extractors: defs + imports use separate walks (unique recursion patterns),
@@ -355,44 +357,39 @@ CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage 
         cbm_extract_k8s(&ctx);
     }
 
-    // LSP type-aware call/usage resolution (per-file). Runs in every mode;
-    // refines the tree-sitter + textual-resolution graph with type info.
+    // LSP type-aware call resolution
     uint64_t lsp_start = now_ns();
-    {
-        if (language == CBM_LANG_GO) {
-            cbm_run_go_lsp(a, result, source, source_len, root);
+    if (language == CBM_LANG_GO) {
+        cbm_run_go_lsp(a, result, source, source_len, root);
+    }
+    if (language == CBM_LANG_C || language == CBM_LANG_CPP || language == CBM_LANG_CUDA) {
+        cbm_run_c_lsp(a, result, source, source_len, root, language != CBM_LANG_C);
+    }
+    if (language == CBM_LANG_PHP) {
+        cbm_run_php_lsp(a, result, source, source_len, root);
+    }
+    if (language == CBM_LANG_PYTHON) {
+        cbm_run_py_lsp(a, result, source, source_len, root);
+    }
+    if (language == CBM_LANG_JAVASCRIPT || language == CBM_LANG_TYPESCRIPT ||
+        language == CBM_LANG_TSX) {
+        bool js_mode = (language == CBM_LANG_JAVASCRIPT);
+        // jsx_mode: TSX always; .jsx in the JS bucket also enables it.
+        bool jsx_mode = (language == CBM_LANG_TSX);
+        if (language == CBM_LANG_JAVASCRIPT && rel_path) {
+            size_t rl = strlen(rel_path);
+            if (rl >= 4 && strcmp(rel_path + rl - 4, ".jsx") == 0) jsx_mode = true;
         }
-        if (language == CBM_LANG_C || language == CBM_LANG_CPP || language == CBM_LANG_CUDA) {
-            cbm_run_c_lsp(a, result, source, source_len, root, language != CBM_LANG_C);
+        // dts_mode: ".d.ts" suffix (TypeScript only).
+        bool dts_mode = false;
+        if (language == CBM_LANG_TYPESCRIPT && rel_path) {
+            size_t rl = strlen(rel_path);
+            if (rl >= 5 && strcmp(rel_path + rl - 5, ".d.ts") == 0) dts_mode = true;
         }
-        if (language == CBM_LANG_PHP) {
-            cbm_run_php_lsp(a, result, source, source_len, root);
-        }
-        if (language == CBM_LANG_PYTHON) {
-            cbm_run_py_lsp(a, result, source, source_len, root);
-        }
-        if (language == CBM_LANG_JAVASCRIPT || language == CBM_LANG_TYPESCRIPT ||
-            language == CBM_LANG_TSX) {
-            bool js_mode = (language == CBM_LANG_JAVASCRIPT);
-            // jsx_mode: TSX always; .jsx in the JS bucket also enables it.
-            bool jsx_mode = (language == CBM_LANG_TSX);
-            if (language == CBM_LANG_JAVASCRIPT && rel_path) {
-                size_t rl = strlen(rel_path);
-                if (rl >= 4 && strcmp(rel_path + rl - 4, ".jsx") == 0)
-                    jsx_mode = true;
-            }
-            // dts_mode: ".d.ts" suffix (TypeScript only).
-            bool dts_mode = false;
-            if (language == CBM_LANG_TYPESCRIPT && rel_path) {
-                size_t rl = strlen(rel_path);
-                if (rl >= 5 && strcmp(rel_path + rl - 5, ".d.ts") == 0)
-                    dts_mode = true;
-            }
-            cbm_run_ts_lsp(a, result, source, source_len, root, js_mode, jsx_mode, dts_mode);
-        }
-        if (language == CBM_LANG_CSHARP) {
-            cbm_run_cs_lsp(a, result, source, source_len, root);
-        }
+        cbm_run_ts_lsp(a, result, source, source_len, root, js_mode, jsx_mode, dts_mode);
+    }
+    if (language == CBM_LANG_CSHARP) {
+        cbm_run_cs_lsp(a, result, source, source_len, root);
     }
     atomic_fetch_add(&total_lsp_ns, now_ns() - lsp_start);
 
@@ -441,9 +438,8 @@ CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage 
                     // harmless (pipeline deduplicates by caller+callee).
                     cbm_extract_unified(&pp_ctx);
 
-                    // Also run LSP on expanded source for additional type-resolved
-                    // calls (language is already C/C++/CUDA — checked in enclosing
-                    // block). Runs in every mode.
+                    // Also run LSP on expanded source for additional type-resolved calls
+                    // (language is already C/C++/CUDA — checked in enclosing block)
                     cbm_run_c_lsp(a, result, expanded, expanded_len, pp_root,
                                   language != CBM_LANG_C);
 
