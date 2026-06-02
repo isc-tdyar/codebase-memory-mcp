@@ -74,17 +74,20 @@ static void os_type_map_add(os_type_map_t *map, const char *var_name, const char
 
 static TSNode find_class_method_call(TSNode root, const char *end) {
     (void)end;
-    if (strcmp(ts_node_type(root), "class_method_call") == 0) return root;
+    if (strcmp(ts_node_type(root), "class_method_call") == 0)
+        return root;
     static const char *containers[] = {"expression", "expr_atom", NULL};
     for (const char **c = containers; *c; c++) {
         TSNode inner = cbm_find_child_by_kind(root, *c);
         if (!ts_node_is_null(inner)) {
             TSNode hit = cbm_find_child_by_kind(inner, "class_method_call");
-            if (!ts_node_is_null(hit)) return hit;
+            if (!ts_node_is_null(hit))
+                return hit;
             TSNode inner2 = cbm_find_child_by_kind(inner, "expr_atom");
             if (!ts_node_is_null(inner2)) {
                 hit = cbm_find_child_by_kind(inner2, "class_method_call");
-                if (!ts_node_is_null(hit)) return hit;
+                if (!ts_node_is_null(hit))
+                    return hit;
             }
         }
     }
@@ -134,7 +137,8 @@ static void handle_objectscript_type_map(CBMExtractCtx *ctx, TSNode node, WalkSt
                 continue;
             }
             TSNode mn_ident = ts_node_named_child_count(method_name_node) > 0
-                ? ts_node_named_child(method_name_node, 0) : (TSNode){0};
+                                  ? ts_node_named_child(method_name_node, 0)
+                                  : (TSNode){0};
             if (ts_node_is_null(mn_ident)) {
                 continue;
             }
@@ -156,16 +160,17 @@ static void handle_objectscript_type_map(CBMExtractCtx *ctx, TSNode node, WalkSt
                 continue;
             }
 
-            bool is_constructor = (strcasecmp(method_text, "%New") == 0 ||
-                                   strcasecmp(method_text, "%OpenId") == 0 ||
-                                   strcasecmp(method_text, "%Open") == 0);
+            bool is_constructor =
+                (strcasecmp(method_text, "%New") == 0 || strcasecmp(method_text, "%OpenId") == 0 ||
+                 strcasecmp(method_text, "%Open") == 0);
             if (!is_constructor) {
                 if (!ctx->return_type_table) {
                     continue;
                 }
                 char *method_qn = cbm_arena_sprintf(ctx->arena, "%s.%s", cls, method_text);
                 for (int rti = 0; rti < ctx->return_type_table->count; rti++) {
-                    if (strcasecmp(ctx->return_type_table->entries[rti].method_qn, method_qn) == 0) {
+                    if (strcasecmp(ctx->return_type_table->entries[rti].method_qn, method_qn) ==
+                        0) {
                         cls = cbm_arena_strdup(ctx->arena,
                                                ctx->return_type_table->entries[rti].return_type);
                         is_constructor = true;
@@ -230,7 +235,7 @@ static const char *objectscript_get_class_name(CBMExtractCtx *ctx, TSNode node) 
 }
 
 static const char *objectscript_get_method_qn(CBMExtractCtx *ctx, TSNode node,
-                                               const char *enclosing_class_qn) {
+                                              const char *enclosing_class_qn) {
     const char *nk = ts_node_type(node);
     if (strcmp(nk, "method") != 0 && strcmp(nk, "classmethod") != 0) {
         return NULL;
@@ -246,11 +251,10 @@ static const char *objectscript_get_method_qn(CBMExtractCtx *ctx, TSNode node,
                         char *name = cbm_node_text(ctx->arena, ident, ctx->source);
                         if (name && name[0]) {
                             if (enclosing_class_qn) {
-                                return cbm_arena_sprintf(ctx->arena, "%s.%s",
-                                                        enclosing_class_qn, name);
+                                return cbm_arena_sprintf(ctx->arena, "%s.%s", enclosing_class_qn,
+                                                         name);
                             }
-                            return cbm_fqn_compute(ctx->arena, ctx->project,
-                                                   ctx->rel_path, name);
+                            return cbm_fqn_compute(ctx->arena, ctx->project, ctx->rel_path, name);
                         }
                     }
                 }
@@ -296,7 +300,7 @@ static TSNode resolve_func_name_node(TSNode node) {
 
 // Compute function QN for scope tracking (mirrors cbm_enclosing_func_qn logic).
 static const char *compute_func_qn(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec,
-                                    WalkState *state) {
+                                   WalkState *state) {
     (void)spec;
     if (ctx->language == CBM_LANG_WOLFRAM) {
         return compute_wolfram_func_qn(ctx, node);

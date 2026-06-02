@@ -450,8 +450,10 @@ static const tool_def_t TOOLS[] = {
      "Returns lists of added/removed/changed nodes with file paths.",
      "{\"type\":\"object\",\"properties\":{"
      "\"project\":{\"type\":\"string\",\"description\":\"Project name (shared by both versions)\"},"
-     "\"from_version\":{\"type\":\"string\",\"description\":\"The baseline version tag (e.g. '28.0')\"},"
-     "\"to_version\":{\"type\":\"string\",\"description\":\"The comparison version tag (e.g. '30.0')\"},"
+     "\"from_version\":{\"type\":\"string\",\"description\":\"The baseline version tag (e.g. "
+     "'28.0')\"},"
+     "\"to_version\":{\"type\":\"string\",\"description\":\"The comparison version tag (e.g. "
+     "'30.0')\"},"
      "\"label\":{\"type\":\"string\",\"default\":\"Class\","
      "\"description\":\"Node label to diff: Class, Method, Function. Default: Class.\"}"
      "},\"required\":[\"project\",\"from_version\",\"to_version\"]}"},
@@ -2562,23 +2564,31 @@ static void build_index_success_response(cbm_mcp_server_t *srv, yyjson_mut_doc *
 
 static void cbm_derive_version_from_path(const char *path, char *out, size_t out_sz) {
     out[0] = '\0';
-    if (!path) return;
+    if (!path)
+        return;
     const char *p = path;
     while (*p) {
         const char *slash = strchr(p, '/');
         size_t seg_len = slash ? (size_t)(slash - p) : strlen(p);
         if (seg_len > 0 && seg_len < out_sz) {
             char seg[256];
-            if (seg_len >= sizeof(seg)) { p = slash ? slash + 1 : p + seg_len; continue; }
+            if (seg_len >= sizeof(seg)) {
+                p = slash ? slash + 1 : p + seg_len;
+                continue;
+            }
             memcpy(seg, p, seg_len);
             seg[seg_len] = '\0';
             int has_digit = 0, has_dot = 0, only_ver = 1;
             for (size_t i = 0; i < seg_len; i++) {
                 char c = seg[i];
-                if (c >= '0' && c <= '9') has_digit = 1;
-                else if (c == '.' || c == '-' || c == '_') { if (c == '.') has_dot = 1; }
-                else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {}
-                else only_ver = 0;
+                if (c >= '0' && c <= '9')
+                    has_digit = 1;
+                else if (c == '.' || c == '-' || c == '_') {
+                    if (c == '.')
+                        has_dot = 1;
+                } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                } else
+                    only_ver = 0;
             }
             if (has_digit && has_dot && only_ver) {
                 memcpy(out, seg, seg_len + 1);
@@ -2586,7 +2596,8 @@ static void cbm_derive_version_from_path(const char *path, char *out, size_t out
             }
         }
         p = slash ? slash + 1 : p + seg_len;
-        if (!slash) break;
+        if (!slash)
+            break;
     }
 }
 
@@ -2634,7 +2645,8 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     } else if (repo_path) {
         char derived[64] = {0};
         cbm_derive_version_from_path(repo_path, derived, sizeof(derived));
-        if (derived[0]) cbm_pipeline_set_version(p, derived);
+        if (derived[0])
+            cbm_pipeline_set_version(p, derived);
     }
     free(version_tag);
 
@@ -3832,11 +3844,9 @@ static void detect_add_impacted_symbols(cbm_store_t *store, const char *project,
     cbm_store_free_nodes(nodes, ncount);
 }
 
-static int run_diff_query(cbm_store_t *store, const char *project,
-                          const char *from_v, const char *to_v,
-                          const char *label,
-                          yyjson_mut_doc *doc, yyjson_mut_val *arr,
-                          const char *change_type) {
+static int run_diff_query(cbm_store_t *store, const char *project, const char *from_v,
+                          const char *to_v, const char *label, yyjson_mut_doc *doc,
+                          yyjson_mut_val *arr, const char *change_type) {
     char qa[CBM_SZ_1K], qb[CBM_SZ_1K];
     const char *va = (strcmp(change_type, "added") == 0) ? to_v : from_v;
     const char *vb = (strcmp(change_type, "added") == 0) ? from_v : to_v;
@@ -3845,12 +3855,8 @@ static int run_diff_query(cbm_store_t *store, const char *project,
         return 0;
     }
 
-    snprintf(qa, sizeof(qa),
-        "MATCH (n:%s {version:'%s'}) RETURN n.name, n.file_path",
-        label, va);
-    snprintf(qb, sizeof(qb),
-        "MATCH (n:%s {version:'%s'}) RETURN n.name",
-        label, vb);
+    snprintf(qa, sizeof(qa), "MATCH (n:%s {version:'%s'}) RETURN n.name, n.file_path", label, va);
+    snprintf(qb, sizeof(qb), "MATCH (n:%s {version:'%s'}) RETURN n.name", label, vb);
 
     cbm_cypher_result_t ra = {0}, rb = {0};
     cbm_cypher_execute(store, qa, project, 2000, &ra);
@@ -3859,34 +3865,42 @@ static int run_diff_query(cbm_store_t *store, const char *project,
     int count = 0;
     for (int r = 0; r < ra.row_count && count < 500; r++) {
         const char *name = ra.rows[r][0];
-        if (!name) continue;
+        if (!name)
+            continue;
         bool found = false;
         for (int i = 0; i < rb.row_count && !found; i++) {
-            if (rb.rows[i][0] && strcmp(rb.rows[i][0], name) == 0) found = true;
+            if (rb.rows[i][0] && strcmp(rb.rows[i][0], name) == 0)
+                found = true;
         }
-        if (found) continue;
+        if (found)
+            continue;
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
         yyjson_mut_obj_add_str(doc, obj, "change", change_type);
         yyjson_mut_obj_add_str(doc, obj, "label", label);
         yyjson_mut_obj_add_strcpy(doc, obj, "name", name);
         const char *fp = (ra.col_count > 1) ? ra.rows[r][1] : NULL;
-        if (fp) yyjson_mut_obj_add_strcpy(doc, obj, "file_path", fp);
+        if (fp)
+            yyjson_mut_obj_add_strcpy(doc, obj, "file_path", fp);
         yyjson_mut_arr_append(arr, obj);
         count++;
-    }    cbm_cypher_result_free(&ra);
+    }
+    cbm_cypher_result_free(&ra);
     cbm_cypher_result_free(&rb);
     return count;
 }
 
 static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
-    char *project   = cbm_mcp_get_string_arg(args, "project");
-    char *from_v    = cbm_mcp_get_string_arg(args, "from_version");
-    char *to_v      = cbm_mcp_get_string_arg(args, "to_version");
+    char *project = cbm_mcp_get_string_arg(args, "project");
+    char *from_v = cbm_mcp_get_string_arg(args, "from_version");
+    char *to_v = cbm_mcp_get_string_arg(args, "to_version");
     char *label_arg = cbm_mcp_get_string_arg(args, "label");
     const char *label = (label_arg && label_arg[0]) ? label_arg : "Class";
 
     if (!from_v || !to_v) {
-        free(project); free(from_v); free(to_v); free(label_arg);
+        free(project);
+        free(from_v);
+        free(to_v);
+        free(label_arg);
         return cbm_mcp_text_result("from_version and to_version are required", true);
     }
 
@@ -3894,7 +3908,11 @@ static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
     if (!store) {
         char *err = build_project_list_error("project not found or not indexed");
         char *res = cbm_mcp_text_result(err, true);
-        free(err); free(project); free(from_v); free(to_v); free(label_arg);
+        free(err);
+        free(project);
+        free(from_v);
+        free(to_v);
+        free(label_arg);
         return res;
     }
 
@@ -3908,7 +3926,7 @@ static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_val *changes = yyjson_mut_arr(doc);
     yyjson_mut_obj_add_val(doc, root, "changes", changes);
 
-    int added   = run_diff_query(store, project, from_v, to_v, label, doc, changes, "added");
+    int added = run_diff_query(store, project, from_v, to_v, label, doc, changes, "added");
     int removed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "removed");
     int changed = run_diff_query(store, project, from_v, to_v, label, doc, changes, "changed");
 
@@ -3918,8 +3936,12 @@ static char *handle_diff_versions(cbm_mcp_server_t *srv, const char *args) {
 
     char *json = yyjson_mut_write(doc, 0, NULL);
     yyjson_mut_doc_free(doc);
-    free(project); free(from_v); free(to_v); free(label_arg);
-    if (!json) return cbm_mcp_text_result("serialization failed", true);
+    free(project);
+    free(from_v);
+    free(to_v);
+    free(label_arg);
+    if (!json)
+        return cbm_mcp_text_result("serialization failed", true);
     char *res = cbm_mcp_text_result(json, false);
     free(json);
     return res;

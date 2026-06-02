@@ -171,7 +171,7 @@ static void append_json_str_array(char *buf, size_t bufsize, size_t *pos, const 
 
 /* Build properties JSON for a definition node. */
 static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
-                             const char *version_tag) {
+                            const char *version_tag) {
     int n = snprintf(buf, bufsize,
                      "{\"complexity\":%d,\"lines\":%d,\"is_exported\":%s,"
                      "\"is_test\":%s,\"is_entry_point\":%s",
@@ -366,10 +366,8 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
             continue;
         }
 
-        CBMFileResult *result =
-            cbm_extract_file(source, source_len, lang, ctx->project_name, rel, CBM_EXTRACT_BUDGET,
-                             NULL, NULL, NULL, NULL
-            );
+        CBMFileResult *result = cbm_extract_file(source, source_len, lang, ctx->project_name, rel,
+                                                 CBM_EXTRACT_BUDGET, NULL, NULL, NULL, NULL);
         free(source);
 
         if (!result) {

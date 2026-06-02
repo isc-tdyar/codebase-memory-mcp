@@ -164,10 +164,10 @@ typedef enum {
     CBM_LANG_APEX,
     CBM_LANG_SOQL,
     CBM_LANG_SOSL,
-    CBM_LANG_KUSTOMIZE, // kustomization.yaml — Kubernetes overlay tool
-    CBM_LANG_K8S,       // Generic Kubernetes manifest (apiVersion: detected)
-    CBM_LANG_PINE,               // Pine Script (TradingView indicator / strategy language)
-    CBM_LANG_OBJECTSCRIPT_UDL,   // InterSystems ObjectScript UDL (.cls class files)
+    CBM_LANG_KUSTOMIZE,            // kustomization.yaml — Kubernetes overlay tool
+    CBM_LANG_K8S,                  // Generic Kubernetes manifest (apiVersion: detected)
+    CBM_LANG_PINE,                 // Pine Script (TradingView indicator / strategy language)
+    CBM_LANG_OBJECTSCRIPT_UDL,     // InterSystems ObjectScript UDL (.cls class files)
     CBM_LANG_OBJECTSCRIPT_ROUTINE, // InterSystems ObjectScript routine (.mac/.int/.rtn/.inc)
     CBM_LANG_OBJECTSCRIPT_EXPORT,  // InterSystems Studio Export XML (<Export generator="Cache">)
     CBM_LANG_COUNT
@@ -503,11 +503,9 @@ int cbm_init(void);
 // timeout_micros: per-file parse timeout in microseconds (0 = no timeout).
 CBMFileResult *cbm_extract_file(const char *source, int source_len, CBMLanguage language,
                                 const char *project, const char *rel_path, int64_t timeout_micros,
-                                const char **extra_defines,
-                                const char **include_paths,
+                                const char **extra_defines, const char **include_paths,
                                 const CBMMacroTable *macro_table,
-                                const CBMReturnTypeTable *return_type_table
-);
+                                const CBMReturnTypeTable *return_type_table);
 
 // Free all memory associated with a result.
 void cbm_free_result(CBMFileResult *result);
