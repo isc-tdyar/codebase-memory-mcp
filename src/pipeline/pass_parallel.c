@@ -62,45 +62,62 @@ static uint64_t extract_now_ns(void) {
     return ((uint64_t)ts.tv_sec * PP_NSEC_PER_SEC) + (uint64_t)ts.tv_nsec;
 }
 
-static const char *SCALAR_RETURN_TYPES[] = {
-    "%String", "%Integer", "%Float", "%Boolean", "%Status",
-    "%Numeric", "%Date", "%Time", "%TimeStamp", "%Binary", NULL
-};
+static const char *SCALAR_RETURN_TYPES[] = {"%String",    "%Integer", "%Float", "%Boolean",
+                                            "%Status",    "%Numeric", "%Date",  "%Time",
+                                            "%TimeStamp", "%Binary",  NULL};
 
 static CBMReturnTypeTable *build_return_type_table(const cbm_gbuf_t *gbuf) {
-    if (!gbuf) return NULL;
+    if (!gbuf)
+        return NULL;
     const cbm_gbuf_node_t **nodes = NULL;
     int count = cbm_gbuf_find_by_label(gbuf, "Method", &nodes, 0);
-    if (count <= 0 || !nodes) return NULL;
+    if (count <= 0 || !nodes)
+        return NULL;
     CBMReturnTypeTable *rtt = (CBMReturnTypeTable *)calloc(1, sizeof(CBMReturnTypeTable));
-    if (!rtt) { free(nodes); return NULL; }
+    if (!rtt) {
+        free(nodes);
+        return NULL;
+    }
     for (int i = 0; i < count && rtt->count < CBM_RETURN_TYPE_TABLE_CAP; i++) {
         const cbm_gbuf_node_t *n = nodes[i];
-        if (!n->qualified_name || !n->properties_json) continue;
+        if (!n->qualified_name || !n->properties_json)
+            continue;
         const char *p = strstr(n->properties_json, "\"return_type\":");
-        if (!p) continue;
+        if (!p)
+            continue;
         p += 14;
-        while (*p == ' ') p++;
-        if (*p != '"') continue;
+        while (*p == ' ')
+            p++;
+        if (*p != '"')
+            continue;
         p++;
         const char *end = strchr(p, '"');
-        if (!end) continue;
+        if (!end)
+            continue;
         int rtlen = (int)(end - p);
-        if (rtlen <= 0 || rtlen > 255) continue;
+        if (rtlen <= 0 || rtlen > 255)
+            continue;
         char rt[256];
         memcpy(rt, p, rtlen);
         rt[rtlen] = '\0';
         bool skip = false;
         for (int si = 0; SCALAR_RETURN_TYPES[si]; si++) {
-            if (strcmp(rt, SCALAR_RETURN_TYPES[si]) == 0) { skip = true; break; }
+            if (strcmp(rt, SCALAR_RETURN_TYPES[si]) == 0) {
+                skip = true;
+                break;
+            }
         }
-        if (skip) continue;
+        if (skip)
+            continue;
         rtt->entries[rtt->count].method_qn = n->qualified_name;
         rtt->entries[rtt->count].return_type = strdup(rt);
         rtt->count++;
     }
     free(nodes);
-    if (rtt->count == 0) { free(rtt); return NULL; }
+    if (rtt->count == 0) {
+        free(rtt);
+        return NULL;
+    }
     return rtt;
 }
 
@@ -243,7 +260,7 @@ static void append_json_str_array(char *buf, size_t bufsize, size_t *pos, const 
 }
 
 static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
-                             const char *version_tag) {
+                            const char *version_tag) {
     int n = snprintf(buf, bufsize,
                      "{\"complexity\":%d,\"lines\":%d,\"is_exported\":%s,"
                      "\"is_test\":%s,\"is_entry_point\":%s",
@@ -254,8 +271,8 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
         return;
     }
     size_t pos = (size_t)n;
-    bool is_storage_meta = def->label && strcmp(def->label, "Storage") == 0 &&
-                           def->docstring && def->docstring[0] == '{';
+    bool is_storage_meta = def->label && strcmp(def->label, "Storage") == 0 && def->docstring &&
+                           def->docstring[0] == '{';
     if (!is_storage_meta) {
         append_json_string(buf, bufsize, &pos, "docstring", def->docstring);
     }
@@ -290,6 +307,18 @@ static void build_def_props(char *buf, size_t bufsize, const CBMDefinition *def,
 
     if (version_tag && version_tag[0] && pos + CBM_SZ_256 < bufsize) {
         append_json_string(buf, bufsize, &pos, "version", version_tag);
+    }
+
+    if (is_storage_meta) {
+        const char *frag = def->docstring + 1;
+        size_t flen = strlen(frag);
+        if (flen > 1 && frag[flen - 1] == '}')
+            flen--;
+        if (pos + flen + 2 < bufsize) {
+            buf[pos++] = ',';
+            memcpy(buf + pos, frag, flen);
+            pos += flen;
+        }
     }
 
     if (pos < bufsize - SKIP_ONE) {
@@ -686,8 +715,8 @@ int cbm_parallel_extract(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
     CBMMacroTable *macro_table_owned = NULL;
     bool has_inc = false;
     for (int i = 0; i < file_count && !has_inc; i++) {
-        if (files[i].language == CBM_LANG_OBJECTSCRIPT_ROUTINE &&
-            files[i].path && strstr(files[i].path, ".inc")) {
+        if (files[i].language == CBM_LANG_OBJECTSCRIPT_ROUTINE && files[i].path &&
+            strstr(files[i].path, ".inc")) {
             has_inc = true;
         }
     }
@@ -698,11 +727,14 @@ int cbm_parallel_extract(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, 
             cbm_arena_init(&mt_arena);
             cbm_macro_table_init_system(macro_table_owned);
             for (int i = 0; i < file_count; i++) {
-                if (files[i].language != CBM_LANG_OBJECTSCRIPT_ROUTINE) continue;
-                if (!files[i].path || !strstr(files[i].path, ".inc")) continue;
+                if (files[i].language != CBM_LANG_OBJECTSCRIPT_ROUTINE)
+                    continue;
+                if (!files[i].path || !strstr(files[i].path, ".inc"))
+                    continue;
                 int slen = 0;
                 char *src = read_file(files[i].path, &slen);
-                if (!src) continue;
+                if (!src)
+                    continue;
                 cbm_parse_inc_file(macro_table_owned, &mt_arena, src);
                 free(src);
             }
@@ -792,9 +824,8 @@ static int register_and_link_def(cbm_pipeline_ctx_t *ctx, const CBMDefinition *d
         if (parent && def_node) {
             cbm_gbuf_insert_edge(ctx->gbuf, parent->id, def_node->id, "DEFINES_METHOD", "{}");
         } else {
-            cbm_log_warn("defines_method.miss", "method", def->qualified_name,
-                         "parent_found", parent ? "1" : "0",
-                         "method_found", def_node ? "1" : "0");
+            cbm_log_warn("defines_method.miss", "method", def->qualified_name, "parent_found",
+                         parent ? "1" : "0", "method_found", def_node ? "1" : "0");
         }
     }
     return edges;
@@ -1076,7 +1107,8 @@ static void finalize_and_emit(cbm_gbuf_t *gbuf, int64_t src_id, int64_t tgt_id,
         }
     }
     cbm_gbuf_insert_edge(gbuf, src_id, tgt_id, edge_type, props);
-    (void)call;}
+    (void)call;
+}
 
 /* Build Route node QN and properties for HTTP/async service edges. */
 static int64_t build_service_route(cbm_gbuf_t *gbuf, const char *arg, const char *method,
@@ -1605,8 +1637,8 @@ static void resolve_file_calls(resolve_ctx_t *rc, resolve_worker_state_t *ws, CB
                 ws->lsp_overrides++;
             }
         } else {
-            res = cbm_registry_resolve(rc->registry, call->callee_name, module_qn,
-                                       imp_keys, imp_vals, imp_count);
+            res = cbm_registry_resolve(rc->registry, call->callee_name, module_qn, imp_keys,
+                                       imp_vals, imp_count);
         }
 
         try_field_type_hint(rc, &res, call->callee_name, source_node->id);

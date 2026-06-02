@@ -11,12 +11,12 @@
 #include "pipeline/pipeline.h"
 #include "pipeline/path_alias.h"
 #include "graph_buffer/graph_buffer.h"
- #include "discover/discover.h"
- #include "foundation/hash_table.h"
- #include "cbm.h"
- #include "macro_table.h"
- #include "lsp/go_lsp.h" /* CBMLSPDef for cbm_parallel_resolve cross-LSP inputs */
- #include <stdatomic.h>
+#include "discover/discover.h"
+#include "foundation/hash_table.h"
+#include "cbm.h"
+#include "macro_table.h"
+#include "lsp/go_lsp.h" /* CBMLSPDef for cbm_parallel_resolve cross-LSP inputs */
+#include <stdatomic.h>
 
 /* ── Shared pipeline constants ─────────────────────────────────── */
 
@@ -95,12 +95,12 @@ CBMHashTable *cbm_pkgmap_build(cbm_pkg_entries_t *worker_entries, int worker_cou
                                const char *project_name);
 
 /* Build pkgmap by reading manifest files from the files array (sequential path). */
- CBMHashTable *cbm_pkgmap_build_from_files(const cbm_file_info_t *files, int file_count,
-                                           const char *project_name);
+CBMHashTable *cbm_pkgmap_build_from_files(const cbm_file_info_t *files, int file_count,
+                                          const char *project_name);
 CBMHashTable *cbm_pkgmap_build_from_repo(const char *repo_path, const cbm_file_info_t *files,
                                          int file_count, const char *project_name);
 
- /* Free pkgmap and all owned strings. */
+/* Free pkgmap and all owned strings. */
 void cbm_pkgmap_free(CBMHashTable *pkgmap);
 
 /* Check cancellation. Returns non-zero if cancelled. */
@@ -374,9 +374,8 @@ int cbm_build_registry_from_cache(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
 struct CBMModuleDefIndex;
 int cbm_parallel_resolve(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count,
                          CBMFileResult **result_cache, _Atomic int64_t *shared_ids,
-                         int worker_count,
-                         CBMLSPDef *all_defs, int def_count, char *const *def_modules,
-                         struct CBMModuleDefIndex *module_def_index,
+                         int worker_count, CBMLSPDef *all_defs, int def_count,
+                         char *const *def_modules, struct CBMModuleDefIndex *module_def_index,
                          void *cross_registries_v);
 
 /* Post-merge: create Route nodes for HTTP_CALLS/ASYNC_CALLS edges that
@@ -396,10 +395,8 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
 /* Cross-file LSP type-aware call resolution pass. Augments per-file
  * resolved_calls with cross-file resolutions before call edges are emitted.
  * Implementation: src/pipeline/pass_lsp_cross.c. */
-int cbm_pipeline_pass_lsp_cross(cbm_pipeline_ctx_t *ctx,
-                                const cbm_file_info_t *files,
-                                int file_count,
-                                CBMFileResult **cache);
+int cbm_pipeline_pass_lsp_cross(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
+                                int file_count, CBMFileResult **cache);
 
 /* Sub-passes called from pass_calls: pattern-based edge extraction */
 void cbm_pipeline_pass_fastapi_depends(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
@@ -436,14 +433,12 @@ int cbm_pipeline_githistory_apply(cbm_pipeline_ctx_t *ctx, const cbm_githistory_
 int cbm_pipeline_pass_decorator_tags(cbm_gbuf_t *gbuf, const char *project);
 
 /* Pre-dump pass: config ↔ code linking. */
- int cbm_pipeline_pass_configlink(cbm_pipeline_ctx_t *ctx);
+int cbm_pipeline_pass_configlink(cbm_pipeline_ctx_t *ctx);
 
- int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
+int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
 
-void cbm_pipeline_pass_ensemble_routing(cbm_pipeline_ctx_t *ctx);
-
-bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz,
-                                 char *method, size_t meth_sz);
+bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz, char *method,
+                                 size_t meth_sz);
 
 /* Pre-dump pass: SEMANTICALLY_RELATED edges via algorithmic embeddings.
  * Opt-in: only runs when CBM_SEMANTIC_ENABLED=1. */

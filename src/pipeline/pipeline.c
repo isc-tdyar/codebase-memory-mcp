@@ -81,7 +81,7 @@ struct cbm_pipeline {
 
     /* IRIS %Dictionary ingest (optional — NULL if not configured) */
     char *iris_host;
-    int   iris_port;
+    int iris_port;
     char *iris_namespace;
     char *iris_user;
     char *iris_pass;
@@ -156,20 +156,25 @@ void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
 }
 
 void cbm_pipeline_set_version(cbm_pipeline_t *p, const char *version_tag) {
-    if (!p) return;
+    if (!p)
+        return;
     free(p->version_tag);
     p->version_tag = version_tag ? strdup(version_tag) : NULL;
 }
 
-void cbm_pipeline_set_iris(cbm_pipeline_t *p,
-                           const char *host, int port,
-                           const char *ns, const char *user,
-                           const char *pass, const char *pkg_filter) {
-    if (!p) { return; }
-    free(p->iris_host);      p->iris_host      = host      ? strdup(host)       : NULL;
-    free(p->iris_namespace); p->iris_namespace = ns        ? strdup(ns)         : NULL;
-    free(p->iris_user);      p->iris_user      = user      ? strdup(user)       : NULL;
-    free(p->iris_pass);      p->iris_pass      = pass      ? strdup(pass)       : NULL;
+void cbm_pipeline_set_iris(cbm_pipeline_t *p, const char *host, int port, const char *ns,
+                           const char *user, const char *pass, const char *pkg_filter) {
+    if (!p) {
+        return;
+    }
+    free(p->iris_host);
+    p->iris_host = host ? strdup(host) : NULL;
+    free(p->iris_namespace);
+    p->iris_namespace = ns ? strdup(ns) : NULL;
+    free(p->iris_user);
+    p->iris_user = user ? strdup(user) : NULL;
+    free(p->iris_pass);
+    p->iris_pass = pass ? strdup(pass) : NULL;
     free(p->iris_package_filter);
     p->iris_package_filter = pkg_filter ? strdup(pkg_filter) : NULL;
     p->iris_port = port > 0 ? port : 1972;
@@ -494,12 +499,12 @@ static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
         const char *name;
         bool moderate_only;
     } passes[] = {
-        {predump_deco,     "decorator_tags",      false},
-        {predump_cfg,      "configlink",          false},
-        {predump_ensemble, "ensemble_routing",    false},
-        {predump_route,    "route_match",         false},
-        {predump_sim,      "similarity",          true},
-        {predump_sem,      "semantic_edges",      true},
+        {predump_deco, "decorator_tags", false},
+        {predump_cfg, "configlink", false},
+        {predump_ensemble, "ensemble_routing", false},
+        {predump_route, "route_match", false},
+        {predump_sim, "similarity", true},
+        {predump_sem, "semantic_edges", true},
     };
     enum { PREDUMP_PASS_COUNT = 6 };
     struct timespec t;
@@ -951,7 +956,6 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     if (!p) {
         return CBM_NOT_FOUND;
     }
-    
 
     CBM_PROF_START(t_pipeline_total);
     struct timespec t0;
@@ -1012,7 +1016,6 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         .path_aliases = path_aliases,
         .version_tag = p->version_tag,
     };
-    
 
     rc = run_extraction_phase(p, &ctx, files, file_count);
     if (rc != 0) {

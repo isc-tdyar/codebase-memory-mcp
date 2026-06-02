@@ -41,7 +41,7 @@ typedef struct {
     } scopes[MAX_SCOPES];
     int scope_top;
 
-    os_type_map_t os_type_map;      // ObjectScript variable → type mapping
+    os_type_map_t os_type_map; // ObjectScript variable → type mapping
 } WalkState;
 
 // Per-node handler prototypes. Each is called once per node during the

@@ -341,7 +341,8 @@ static char *extract_callee_lang_specific(CBMArena *a, TSNode node, const char *
                     return NULL;
                 }
                 TSNode mname_ident = ts_node_named_child_count(method_name) > 0
-                    ? ts_node_named_child(method_name, 0) : (TSNode){0};
+                                         ? ts_node_named_child(method_name, 0)
+                                         : (TSNode){0};
                 if (ts_node_is_null(mname_ident)) {
                     return cls;
                 }
@@ -748,7 +749,8 @@ static char *resolve_objectscript_instance_call(CBMArena *a, TSNode node, const 
         return NULL;
     }
     TSNode mn_ident = ts_node_named_child_count(method_name_node) > 0
-        ? ts_node_named_child(method_name_node, 0) : (TSNode){0};
+                          ? ts_node_named_child(method_name_node, 0)
+                          : (TSNode){0};
     if (ts_node_is_null(mn_ident)) {
         return NULL;
     }
@@ -803,20 +805,21 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
              ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
             strcmp(ts_node_type(node), "instance_method_call") == 0) {
             callee = resolve_objectscript_instance_call(ctx->arena, node, ctx->source,
-                                                       &state->os_type_map);
+                                                        &state->os_type_map);
         }
 
         if (!callee &&
             (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
              ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) &&
-            strcmp(ts_node_type(node), "relative_dot_method") == 0 &&
-            state->enclosing_class_qn && state->enclosing_class_qn[0]) {
+            strcmp(ts_node_type(node), "relative_dot_method") == 0 && state->enclosing_class_qn &&
+            state->enclosing_class_qn[0]) {
             TSNode oref = cbm_find_child_by_kind(node, "oref_method");
             if (!ts_node_is_null(oref)) {
                 TSNode mname_node = cbm_find_child_by_kind(oref, "method_name");
                 if (!ts_node_is_null(mname_node)) {
                     TSNode ident = ts_node_named_child_count(mname_node) > 0
-                                   ? ts_node_named_child(mname_node, 0) : (TSNode){0};
+                                       ? ts_node_named_child(mname_node, 0)
+                                       : (TSNode){0};
                     if (!ts_node_is_null(ident)) {
                         char *mname = cbm_node_text(ctx->arena, ident, ctx->source);
                         if (mname && mname[0])
@@ -849,9 +852,8 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
             call.enclosing_func_qn = state->enclosing_func_qn;
 
             TSNode args = ts_node_child_by_field_name(node, TS_FIELD("arguments"));
-            if (ts_node_is_null(args) &&
-                (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
-                 ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
+            if (ts_node_is_null(args) && (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
+                                          ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE)) {
                 TSNode oref = cbm_find_child_by_kind(node, "oref_method");
                 if (!ts_node_is_null(oref)) {
                     args = cbm_find_child_by_kind(oref, "method_args");
@@ -868,13 +870,14 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
                 if (ctx->language == CBM_LANG_OBJECTSCRIPT_UDL ||
                     ctx->language == CBM_LANG_OBJECTSCRIPT_ROUTINE) {
                     for (uint32_t ai = 0;
-                         ai < ts_node_named_child_count(args) &&
-                         call.arg_count < CBM_MAX_CALL_ARGS;
+                         ai < ts_node_named_child_count(args) && call.arg_count < CBM_MAX_CALL_ARGS;
                          ai++) {
                         TSNode achild = ts_node_named_child(args, ai);
                         const char *ack = ts_node_type(achild);
-                        if (strcmp(ack, "bracket") == 0) continue;
-                        if (strcmp(ack, "method_arg") != 0) continue;
+                        if (strcmp(ack, "bracket") == 0)
+                            continue;
+                        if (strcmp(ack, "method_arg") != 0)
+                            continue;
                         CBMCallArg *ca = &call.args[call.arg_count];
                         memset(ca, 0, sizeof(*ca));
                         ca->index = call.arg_count;
@@ -893,9 +896,9 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
             if (ctx->language == CBM_LANG_PYTHON && !ts_node_is_null(args)) {
                 const char *cn = call.callee_name;
                 size_t len = cn ? strlen(cn) : 0;
-                static const char *iris_dispatch[] = {
-                    ".classMethodValue", ".classMethodVoid",
-                    ".classMethodBoolean", ".classMethodObject", NULL};
+                static const char *iris_dispatch[] = {".classMethodValue", ".classMethodVoid",
+                                                      ".classMethodBoolean", ".classMethodObject",
+                                                      NULL};
                 for (const char **nm = iris_dispatch; *nm; nm++) {
                     size_t nlen = strlen(*nm);
                     if (len >= nlen && strcmp(cn + len - nlen, *nm) == 0) {
