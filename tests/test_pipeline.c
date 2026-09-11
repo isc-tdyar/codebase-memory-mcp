@@ -13652,6 +13652,216 @@ TEST(pipeline_ensemble_routing_method_scoping) {
     PASS();
 }
 
+/* ── WorkMgr dispatch (pass_workmgr_dispatch.c) ─────────────────────
+ * The regular call extractor also emits CALLS edges, so every assertion
+ * below filters on the "via":"workmgr_queue" property to see only edges
+ * produced by this pass. */
+
+static int th_count_workmgr_edges(cbm_store_t *s, int64_t source_id, int64_t target_id) {
+    cbm_edge_t *edges = NULL;
+    int ec = 0;
+    cbm_store_find_edges_by_source_type(s, source_id, "CALLS", &edges, &ec);
+    int n = 0;
+    for (int i = 0; i < ec; i++) {
+        if (edges[i].properties_json &&
+            strstr(edges[i].properties_json, "\"via\":\"workmgr_queue\"") &&
+            (target_id == 0 || edges[i].target_id == target_id))
+            n++;
+    }
+    cbm_store_free_edges(edges, ec);
+    return n;
+}
+
+static bool th_write_cls(const char *dir, const char *file, const char *body) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, file);
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return false;
+    fputs(body, f);
+    fclose(f);
+    return true;
+}
+
+TEST(pipeline_workmgr_basic) {
+    /* A literal ##class(MyApp.Worker).Run target resolves to the indexed
+     * ClassMethod and produces one workmgr CALLS edge from the caller. */
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_wm1_XXXXXX");
+    if (!cbm_mkdtemp(tmpdir))
+        FAIL("failed to create temp dir");
+
+    if (!th_write_cls(
+            tmpdir, "Caller.cls",
+            "Class MyApp.Caller Extends %RegisteredObject\n"
+            "{\n"
+            "Method Dispatch(pArg As %String) As %Status\n"
+            "{\n"
+            "    Set tSC = ##class(%SYSTEM.WorkMgr).Queue(\"##class(MyApp.Worker).Run\", pArg)\n"
+            "    Quit tSC\n"
+            "}\n"
+            "}\n") ||
+        !th_write_cls(tmpdir, "Worker.cls",
+                      "Class MyApp.Worker Extends %RegisteredObject\n"
+                      "{\n"
+                      "ClassMethod Run(pArg As %String) As %Status\n"
+                      "{\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "}\n")) {
+        th_rmtree(tmpdir);
+        FAIL("fopen fixture");
+    }
+
+    char db_path[512];
+    snprintf(db_path, sizeof(db_path), "%s/wm.db", tmpdir);
+    cbm_pipeline_t *p = cbm_pipeline_new(tmpdir, db_path, CBM_MODE_FULL);
+    ASSERT_NOT_NULL(p);
+    ASSERT_EQ(cbm_pipeline_run(p), 0);
+
+    cbm_store_t *s = cbm_store_open_path(db_path);
+    ASSERT_NOT_NULL(s);
+    const char *project = cbm_pipeline_project_name(p);
+
+    cbm_node_t *callers = NULL, *runs = NULL;
+    int nc = 0, nr = 0;
+    cbm_store_find_nodes_by_name(s, project, "Dispatch", &callers, &nc);
+    cbm_store_find_nodes_by_name(s, project, "Run", &runs, &nr);
+    ASSERT_GTE(nc, 1);
+    ASSERT_GTE(nr, 1);
+
+    ASSERT_EQ(th_count_workmgr_edges(s, callers[0].id, runs[0].id), 1);
+
+    cbm_store_free_nodes(callers, nc);
+    cbm_store_free_nodes(runs, nr);
+    cbm_store_close(s);
+    cbm_pipeline_free(p);
+    th_rmtree(tmpdir);
+    PASS();
+}
+
+TEST(pipeline_workmgr_method_isolation) {
+    /* Two methods in one class each queue a different target. Each must get
+     * exactly its own edge; a whole-file scan would attribute the first
+     * target to both methods. */
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_wm2_XXXXXX");
+    if (!cbm_mkdtemp(tmpdir))
+        FAIL("failed to create temp dir");
+
+    if (!th_write_cls(tmpdir, "Caller.cls",
+                      "Class MyApp.Caller Extends %RegisteredObject\n"
+                      "{\n"
+                      "Method MethodA() As %Status\n"
+                      "{\n"
+                      "    Do ##class(%SYSTEM.WorkMgr).Queue(\"##class(MyApp.TargetA).DoA\")\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "Method MethodB() As %Status\n"
+                      "{\n"
+                      "    Do ##class(%SYSTEM.WorkMgr).Queue(\"##class(MyApp.TargetB).DoB\")\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "}\n") ||
+        !th_write_cls(tmpdir, "TargetA.cls",
+                      "Class MyApp.TargetA Extends %RegisteredObject\n"
+                      "{\n"
+                      "ClassMethod DoA() As %Status\n"
+                      "{\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "}\n") ||
+        !th_write_cls(tmpdir, "TargetB.cls",
+                      "Class MyApp.TargetB Extends %RegisteredObject\n"
+                      "{\n"
+                      "ClassMethod DoB() As %Status\n"
+                      "{\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "}\n")) {
+        th_rmtree(tmpdir);
+        FAIL("fopen fixture");
+    }
+
+    char db_path[512];
+    snprintf(db_path, sizeof(db_path), "%s/wm.db", tmpdir);
+    cbm_pipeline_t *p = cbm_pipeline_new(tmpdir, db_path, CBM_MODE_FULL);
+    ASSERT_NOT_NULL(p);
+    ASSERT_EQ(cbm_pipeline_run(p), 0);
+
+    cbm_store_t *s = cbm_store_open_path(db_path);
+    ASSERT_NOT_NULL(s);
+    const char *project = cbm_pipeline_project_name(p);
+
+    cbm_node_t *ma = NULL, *mb = NULL, *ta = NULL, *tb = NULL;
+    int nma = 0, nmb = 0, nta = 0, ntb = 0;
+    cbm_store_find_nodes_by_name(s, project, "MethodA", &ma, &nma);
+    cbm_store_find_nodes_by_name(s, project, "MethodB", &mb, &nmb);
+    cbm_store_find_nodes_by_name(s, project, "DoA", &ta, &nta);
+    cbm_store_find_nodes_by_name(s, project, "DoB", &tb, &ntb);
+    ASSERT_GTE(nma, 1);
+    ASSERT_GTE(nmb, 1);
+    ASSERT_GTE(nta, 1);
+    ASSERT_GTE(ntb, 1);
+
+    ASSERT_EQ(th_count_workmgr_edges(s, ma[0].id, ta[0].id), 1);
+    ASSERT_EQ(th_count_workmgr_edges(s, ma[0].id, tb[0].id), 0);
+    ASSERT_EQ(th_count_workmgr_edges(s, mb[0].id, tb[0].id), 1);
+    ASSERT_EQ(th_count_workmgr_edges(s, mb[0].id, ta[0].id), 0);
+
+    cbm_store_free_nodes(ma, nma);
+    cbm_store_free_nodes(mb, nmb);
+    cbm_store_free_nodes(ta, nta);
+    cbm_store_free_nodes(tb, ntb);
+    cbm_store_close(s);
+    cbm_pipeline_free(p);
+    th_rmtree(tmpdir);
+    PASS();
+}
+
+TEST(pipeline_workmgr_system_skip) {
+    /* A %SYSTEM.* target is never in the corpus: no edge, no crash. */
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_wm3_XXXXXX");
+    if (!cbm_mkdtemp(tmpdir))
+        FAIL("failed to create temp dir");
+
+    if (!th_write_cls(tmpdir, "Caller.cls",
+                      "Class MyApp.Caller Extends %RegisteredObject\n"
+                      "{\n"
+                      "Method Dispatch() As %Status\n"
+                      "{\n"
+                      "    Do ##class(%SYSTEM.WorkMgr).Queue(\"##class(%SYSTEM.SomeHelper).Do\")\n"
+                      "    Quit $$$OK\n"
+                      "}\n"
+                      "}\n")) {
+        th_rmtree(tmpdir);
+        FAIL("fopen fixture");
+    }
+
+    char db_path[512];
+    snprintf(db_path, sizeof(db_path), "%s/wm.db", tmpdir);
+    cbm_pipeline_t *p = cbm_pipeline_new(tmpdir, db_path, CBM_MODE_FULL);
+    ASSERT_NOT_NULL(p);
+    ASSERT_EQ(cbm_pipeline_run(p), 0);
+
+    cbm_store_t *s = cbm_store_open_path(db_path);
+    ASSERT_NOT_NULL(s);
+    const char *project = cbm_pipeline_project_name(p);
+
+    cbm_node_t *callers = NULL;
+    int nc = 0;
+    cbm_store_find_nodes_by_name(s, project, "Dispatch", &callers, &nc);
+    ASSERT_GTE(nc, 1);
+    ASSERT_EQ(th_count_workmgr_edges(s, callers[0].id, 0), 0);
+
+    cbm_store_free_nodes(callers, nc);
+    cbm_store_close(s);
+    cbm_pipeline_free(p);
+    th_rmtree(tmpdir);
+    PASS();
+}
+
 /* #518/#519 item-7 regression: the DELTA merge is the warm path most users
  * hit. It used to write nodes_fts with a hand-rolled four-column INSERT of
  * its own; with a fifth `body` column that literal leaves prose NULL for every
@@ -14254,6 +14464,9 @@ SUITE(pipeline) {
     RUN_TEST(pipeline_ensemble_routing_attr_does_not_leak_across_items);
     RUN_TEST(pipeline_ensemble_routing_settings_targets);
     RUN_TEST(pipeline_ensemble_routing_unterminated_item_is_safe);
+    RUN_TEST(pipeline_workmgr_basic);
+    RUN_TEST(pipeline_workmgr_method_isolation);
+    RUN_TEST(pipeline_workmgr_system_skip);
     RUN_TEST(pipeline_delta_patch_indexes_docstring_into_fts_body);
     RUN_TEST(pipeline_markdown_and_config_prose_reaches_fts_body);
     RUN_TEST(pipeline_semantic_edges_no_functions);

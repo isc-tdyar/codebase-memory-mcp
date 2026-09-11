@@ -20,6 +20,7 @@ enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 6 };
 #include "pipeline/lsp_surface.h"
 #include "pipeline/pass_lsp_cross.h"
 #include "pipeline/pass_ensemble_routing.h"
+#include "pipeline/pass_workmgr_dispatch.h"
 #include "pipeline/worker_pool.h"
 #include "graph_buffer/graph_buffer.h"
 #include "git/git_context.h"
@@ -946,6 +947,9 @@ static void predump_complexity(cbm_pipeline_ctx_t *ctx) {
 static void predump_ensemble(cbm_pipeline_ctx_t *ctx) {
     cbm_pipeline_pass_ensemble_routing(ctx);
 }
+static void predump_workmgr(cbm_pipeline_ctx_t *ctx) {
+    cbm_pipeline_pass_workmgr_dispatch(ctx);
+}
 static void predump_importance(cbm_pipeline_ctx_t *ctx) {
     cbm_pipeline_pass_importance(ctx);
 }
@@ -960,6 +964,7 @@ static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
         {predump_cfg, "configlink", false},
         {predump_route, "route_match", false},
         {predump_ensemble, "ensemble_routing", false},
+        {predump_workmgr, "workmgr_dispatch", false},
         {predump_sim, "similarity", true},
         {predump_sem, "semantic_edges", true},
         {predump_complexity, "complexity", false},
